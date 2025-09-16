@@ -1,0 +1,40 @@
+# Use a CUDA runtime base image
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+# Non-interactive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set working directory
+WORKDIR /app
+
+# Install runtime dependencies AND build tools
+# ADDED: build-essential, python3-dev, pkg-config, git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsndfile1 \
+    ffmpeg \
+    build-essential \
+    python3-dev \
+    pkg-config \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only the requirements file first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+# Fairseq installation may require specific torch/cuda versions, 
+# so we install them explicitly first.
+RUN pip install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html
+RUN pip install -r requirements.txt
+
+# Copy the rest of the application code
+COPY . .
+
+# Ensure the start script is executable
+RUN chmod +x ./start_voice.sh
+
+# Expose port
+EXPOSE 8081
+
+# Start script
+CMD ["./start_voice.sh"]
