@@ -9,7 +9,6 @@ scipy==1.13.1
 soundfile==0.12.1
 torchcrepe==0.0.20
 tqdm==4.65.0
-omegaconf==2.0.6
 
 # server requirements
 fastapi
