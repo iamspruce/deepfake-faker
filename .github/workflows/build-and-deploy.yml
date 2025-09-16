@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev
 
       - name: Package Backends with PyInstaller
-        run: python scripts/package_zip.py
+        run: python ci/package_zip.py
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
