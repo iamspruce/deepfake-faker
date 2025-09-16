@@ -5,8 +5,9 @@ FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-venv python3-pip git libsndfile1 wget unzip \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
-
+    
 # Set the working directory
 WORKDIR /app
 
