@@ -91,7 +91,7 @@ def package_backend(backend, version, device, os_name):
         else:
             if actual_os == "windows" or actual_os == "linux":
                 run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html --no-cache-dir")
-                run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.3")
+                run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.4")
             else:
                 print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
                 return
