@@ -76,6 +76,11 @@ def package_backend(backend, version, device, os_name):
         pyinstaller = venv_dir / "bin" / "pyinstaller"
     print(f"[DEBUG] Actual OS: {actual_os}, pip: {pip}, pyinstaller: {pyinstaller}")
 
+    run(f"\"{pip}\" install pyinstaller")
+
+    # sanity check: ensure pyinstaller is actually installed
+    run(f"\"{sys.executable}\" -m PyInstaller --version")
+
     requirements_file = backend_dir / "requirements.txt"
     print(f"[DEBUG] Installing requirements from {requirements_file}")
     run(f"\"{pip}\" install -r \"{requirements_file}\"")
