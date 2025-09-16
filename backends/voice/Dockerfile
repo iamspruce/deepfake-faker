@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-venv python3-pip git libsndfile1 wget unzip \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
-    
+
 # Set the working directory
 WORKDIR /app
 
@@ -23,6 +23,10 @@ RUN unzip /app/klee.zip -d /app/rvc_models/Klee && rm /app/klee.zip
 
 # Copy and install Python requirements
 COPY requirements.txt .
+
+# Downgrade pip to 23.0.1
+RUN python3 -m pip install --no-cache-dir pip==23.0.1
+
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the voice backend code into the container
