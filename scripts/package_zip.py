@@ -95,7 +95,7 @@ def package_backend(backend, version, device, os_name):
                 return
     elif backend == "face":
         if device == "cpu":
-            run(f"\"{pip}\" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
+            run(f"\"{pip}\" install torch torchvision torchaudio")
             run(f"\"{pip}\" install onnxruntime")
         else:
             if actual_os == "windows" or actual_os == "linux":
@@ -136,21 +136,24 @@ def package_backend(backend, version, device, os_name):
 
 if __name__ == "__main__":
     version = os.environ.get("GITHUB_REF_NAME", "dev")
-    print(f"[DEBUG] Version: {version}")
-    print(f"[DEBUG] Running in directory: {os.getcwd()}")
-    print(f"[DEBUG] Actual platform: {platform.system().lower()}")
-
     runner = os.environ.get("GITHUB_RUNNER", "ubuntu-latest")
     os_name = RUNNER_TO_OS.get(runner, 'linux')
     device = os.environ.get("GITHUB_DEVICE", "cpu")
-    print(f"[DEBUG] Runner: {runner}, Mapped os_name: {os_name}, Device: {device}")
+    backend = os.environ.get("GITHUB_BACKEND")  # NEW
 
     if os_name == "macos" and device == "gpu":
         print(f"[SKIP] Skipping for {os_name}/gpu (unsupported).")
         sys.exit(0)
 
-    for backend in BACKENDS:
+    if backend:
         try:
             package_backend(backend, version, device, os_name)
         except Exception as e:
             print(f"[FAIL] Failed to package {backend} for {os_name}/{device}: {e}")
+    else:
+        # Fallback: build all (like before)
+        for b in BACKENDS:
+            try:
+                package_backend(b, version, device, os_name)
+            except Exception as e:
+                print(f"[FAIL] Failed to package {b} for {os_name}/{device}: {e}")

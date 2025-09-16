@@ -3,21 +3,21 @@ name: Build Backends + Docker + Release
 on:
   push:
     tags:
-      - "v*" # triggers on tag push
+      - "v*"
 
 jobs:
   package-backends:
-    name: Package ${{ matrix.runner }}-${{ matrix.device }} Backends
+    name: Package ${{ matrix.backend }}-${{ matrix.runner }}-${{ matrix.device }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, windows-latest, macos-latest]
         device: [cpu, gpu]
+        backend: [face, voice]
         exclude:
           - runner: macos-latest
             device: gpu
-
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -27,31 +27,23 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 🧹 Free up disk space on Linux runners
-      - name: Free Disk Space
-        if: ${{ matrix.runner == 'ubuntu-latest' }}
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          df -h
-
+      # Linux deps
       - name: Install Linux System Dependencies
         if: ${{ matrix.runner == 'ubuntu-latest' }}
         run: |
           sudo apt-get update || { echo "apt-get update failed"; exit 1; }
           sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev portaudio19-dev || { echo "apt-get install failed"; exit 1; }
           if [ "${{ matrix.device }}" == "gpu" ]; then
-            # Install *runtime* CUDA libs instead of full toolkit (saves space)
             sudo apt-get install -y nvidia-cuda-toolkit-gcc || echo "Skipped full CUDA install"
           fi
 
+      # Windows deps
       - name: Install Windows System Dependencies
         if: ${{ matrix.runner == 'windows-latest' }}
         run: |
           choco install -y git wget unzip ffmpeg || { echo "choco install failed"; exit 1; }
 
+      # macOS deps
       - name: Install macOS System Dependencies
         if: ${{ matrix.runner == 'macos-latest' }}
         run: |
@@ -60,51 +52,58 @@ jobs:
       - name: Downgrade pip
         run: python -m pip install pip==23.3.2
 
-      - name: Package Backends with PyInstaller
+      - name: Package Backend with PyInstaller
         run: python scripts/package_zip.py
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_RUNNER: ${{ matrix.runner }}
           GITHUB_DEVICE: ${{ matrix.device }}
+          GITHUB_BACKEND: ${{ matrix.backend }}
         working-directory: ${{ github.workspace }}
 
-      # 🧹 Purge pip cache to recover space
       - name: Clean pip cache
-        run: |
-          pip cache purge || true
+        run: pip cache purge || true
 
-      # 🧹 Remove venv after packaging (binary is already built)
-      - name: Cleanup venv
-        run: |
-          rm -rf build_*/*/venv || true
+      - name: Cleanup venv (Unix)
+        if: runner.os != 'Windows'
+        run: rm -rf build_*/*/venv || true
 
-      - name: Upload Zip Artifacts
+      - name: Cleanup venv (Windows)
+        if: runner.os == 'Windows'
+        run: Remove-Item -Recurse -Force build_*/*/venv
+        shell: powershell
+
+      - name: Upload Zip Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: backend-${{ matrix.runner }}-${{ matrix.device }}
+          name: backend-${{ matrix.backend }}-${{ matrix.runner }}-${{ matrix.device }}
           path: "*.zip"
 
   create-release:
-    name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: package-backends
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-        continue-on-error: true
+          path: release
 
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - name: Re-zip per backend
+        run: |
+          cd release
+          for dir in */; do
+            zip -r "${dir%/}.zip" "$dir"
+          done
+          ls -lh
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: artifacts/*/*.zip
-        continue-on-error: true
+          name: "Release ${{ github.ref_name }}"
+          files: release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker-runpod:
     name: Build Docker Images for Runpod (Linux GPU)
@@ -114,7 +113,6 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      # 🧹 Free up disk space before Docker build
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -129,39 +127,41 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Download Linux GPU zips from artifacts
+      - name: Download Face Linux GPU artifact
         uses: actions/download-artifact@v4
         with:
-          name: backend-ubuntu-latest-gpu
-          path: backends_dist
+          name: backend-face-ubuntu-latest-gpu
+          path: backends_dist/face
         continue-on-error: true
 
-      - name: Unzip Artifacts
-        run: |
-          unzip -o backends_dist/face-linux-gpu-*.zip -d backends_dist/face || echo "No face-linux-gpu zip found"
-          unzip -o backends_dist/voice-linux-gpu-*.zip -d backends_dist/voice || echo "No voice-linux-gpu zip found"
+      - name: Download Voice Linux GPU artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-voice-ubuntu-latest-gpu
+          path: backends_dist/voice
+        continue-on-error: true
 
-      # 🧹 Clean pip cache inside runner to avoid unnecessary gigabytes
-      - name: Clean pip cache
-        run: |
-          pip cache purge || true
+      - name: List downloaded artifacts
+        run: ls -R backends_dist || true
 
-      # 🐳 Build & push Face Docker image
       - name: "Build and Push Docker Image: Face"
         uses: docker/build-push-action@v5
         with:
           context: ./backends_dist/face
           file: ./backends/face/Dockerfile.face.gpu
           push: true
-          tags: "spruceemma/face-backend:${{ github.ref_name }},spruceemma/face-backend:latest"
+          tags: |
+            spruceemma/face-backend:${{ github.ref_name }}
+            spruceemma/face-backend:latest
         continue-on-error: true
 
-      # 🐳 Build & push Voice Docker image
       - name: "Build and Push Docker Image: Voice"
         uses: docker/build-push-action@v5
         with:
           context: ./backends_dist/voice
           file: ./backends/voice/Dockerfile.voice.gpu
           push: true
-          tags: "spruceemma/voice-backend:${{ github.ref_name }},spruceemma/voice-backend:latest"
+          tags: |
+            spruceemma/voice-backend:${{ github.ref_name }}
+            spruceemma/voice-backend:latest
         continue-on-error: true
