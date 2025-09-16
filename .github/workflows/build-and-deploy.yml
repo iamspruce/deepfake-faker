@@ -27,19 +27,30 @@ jobs:
         with:
           python-version: "3.10"
 
+      # 🧹 Free up disk space on Linux runners
+      - name: Free Disk Space
+        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          df -h
+
       - name: Install Linux System Dependencies
         if: ${{ matrix.runner == 'ubuntu-latest' }}
         run: |
           sudo apt-get update || { echo "apt-get update failed"; exit 1; }
           sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev portaudio19-dev || { echo "apt-get install failed"; exit 1; }
           if [ "${{ matrix.device }}" == "gpu" ]; then
-            sudo apt-get install -y nvidia-cuda-toolkit || { echo "CUDA toolkit install failed"; exit 1; }
+            # Install *runtime* CUDA libs instead of full toolkit (saves space)
+            sudo apt-get install -y nvidia-cuda-toolkit-gcc || echo "Skipped full CUDA install"
           fi
 
       - name: Install Windows System Dependencies
         if: ${{ matrix.runner == 'windows-latest' }}
         run: |
-          choco install -y git wget unzip ffmpeg portaudio || { echo "choco install failed"; exit 1; }
+          choco install -y git wget unzip ffmpeg || { echo "choco install failed"; exit 1; }
 
       - name: Install macOS System Dependencies
         if: ${{ matrix.runner == 'macos-latest' }}
@@ -56,14 +67,22 @@ jobs:
           GITHUB_RUNNER: ${{ matrix.runner }}
           GITHUB_DEVICE: ${{ matrix.device }}
         working-directory: ${{ github.workspace }}
-        continue-on-error: false
+
+      # 🧹 Purge pip cache to recover space
+      - name: Clean pip cache
+        run: |
+          pip cache purge || true
+
+      # 🧹 Remove venv after packaging (binary is already built)
+      - name: Cleanup venv
+        run: |
+          rm -rf build_*/*/venv || true
 
       - name: Upload Zip Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: backend-${{ matrix.runner }}-${{ matrix.device }}
           path: "*.zip"
-        continue-on-error: true
 
   create-release:
     name: Create GitHub Release
@@ -95,6 +114,15 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
+      # 🧹 Free up disk space before Docker build
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          df -h
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -113,6 +141,12 @@ jobs:
           unzip -o backends_dist/face-linux-gpu-*.zip -d backends_dist/face || echo "No face-linux-gpu zip found"
           unzip -o backends_dist/voice-linux-gpu-*.zip -d backends_dist/voice || echo "No voice-linux-gpu zip found"
 
+      # 🧹 Clean pip cache inside runner to avoid unnecessary gigabytes
+      - name: Clean pip cache
+        run: |
+          pip cache purge || true
+
+      # 🐳 Build & push Face Docker image
       - name: "Build and Push Docker Image: Face"
         uses: docker/build-push-action@v5
         with:
@@ -122,6 +156,7 @@ jobs:
           tags: "spruceemma/face-backend:${{ github.ref_name }},spruceemma/face-backend:latest"
         continue-on-error: true
 
+      # 🐳 Build & push Voice Docker image
       - name: "Build and Push Docker Image: Voice"
         uses: docker/build-push-action@v5
         with:
