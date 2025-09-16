@@ -77,13 +77,12 @@ def package_backend(backend, version, device, os_name):
     print(f"[DEBUG] Actual OS: {actual_os}, pip: {pip}, pyinstaller: {pyinstaller}")
 
     run(f"\"{pip}\" install pyinstaller")
-
-    # sanity check: ensure pyinstaller is actually installed
-    run(f"\"{sys.executable}\" -m PyInstaller --version")
+    
+    run(f'"{pyinstaller}" --version')
 
     requirements_file = backend_dir / "requirements.txt"
     print(f"[DEBUG] Installing requirements from {requirements_file}")
-    run(f"\"{pip}\" install -r \"{requirements_file}\"")
+    run(f"\"{pip}\" install -r \"{requirements_file}\" --no-cache-dir")
 
     if backend == "voice":
         if device == "cpu":
@@ -91,7 +90,7 @@ def package_backend(backend, version, device, os_name):
             run(f"\"{pip}\" install fairseq==0.12.2 faiss-cpu==1.7.3")
         else:
             if actual_os == "windows" or actual_os == "linux":
-                run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html")
+                run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html --no-cache-dir")
                 run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.3")
             else:
                 print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
