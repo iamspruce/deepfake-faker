@@ -26,10 +26,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install Linux System Dependencies
-        if: matrix.os == 'linux'
+        if: ${{ matrix.os == 'linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev
@@ -68,7 +68,7 @@ jobs:
   docker-runpod:
     name: Build Docker Images for Runpod (Linux GPU)
     runs-on: ubuntu-latest
-    needs: package-backends # Depends on the packaging job
+    needs: package-backends
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -90,18 +90,18 @@ jobs:
           unzip -o backends_dist/face-linux-gpu-*.zip -d backends_dist/face
           unzip -o backends_dist/voice-linux-gpu-*.zip -d backends_dist/voice
 
-      - name: Build and Push Docker Image: Face
+      - name: "Build and Push Docker Image: Face"
         uses: docker/build-push-action@v5
         with:
           context: ./backends_dist/face
           file: ./backends/face/Dockerfile.face.gpu
           push: true
-          tags: your-dockerhub-org/face-backend:${{ github.ref_name }},your-dockerhub-org/face-backend:latest
-  
-      - name: Build and Push Docker Image: Voice
+          tags: "spruceemma/face-backend:${{ github.ref_name }},spruceemma/face-backend:latest"
+
+      - name: "Build and Push Docker Image: Voice"
         uses: docker/build-push-action@v5
         with:
           context: ./backends_dist/voice
           file: ./backends/voice/Dockerfile.voice.gpu
           push: true
-          tags: spruceemma/voice-backend:${{ github.ref_name }},spruceemma/voice-backend:latest
+          tags: "spruceemma/voice-backend:${{ github.ref_name }},spruceemma/voice-backend:latest"
