@@ -3,6 +3,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKENDS = ["face", "voice"]
+RUNNER_TO_OS = {
+    'ubuntu-latest': 'linux',
+    'windows-latest': 'windows',
+    'macos-latest': 'macos'
+}
 
 def run(cmd, cwd=None):
     print(f"[RUN] {cmd}")
@@ -27,6 +32,22 @@ def write_version_file(build_dir, version):
     print(f"[DEBUG] Writing VERSION file to {build_dir}")
     (build_dir / "VERSION").write_text(version)
     print(f"[DEBUG] Wrote VERSION: {version}")
+    
+IGNORE_DIRS = {"venv", "__pycache__", "tests", "models", "rvc_models"}
+
+def copy_backend_files(backend_dir, build_dir, backend):
+    print(f"[DEBUG] Copying files from {backend_dir} to {build_dir} (ignoring models/tests/venv)")
+    for item in backend_dir.iterdir():
+        if item.name in IGNORE_DIRS:
+            print(f"[SKIP] {item} (ignored)")
+            continue
+        target = build_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+            print(f"[DEBUG] Copied directory {item} -> {target}")
+        else:
+            shutil.copy(item, target)
+            print(f"[DEBUG] Copied file {item} -> {target}")
 
 def package_backend(backend, version, device, os_name):
     print(f"[DEBUG] Packaging {backend} for {os_name}/{device}, version: {version}")
@@ -40,20 +61,12 @@ def package_backend(backend, version, device, os_name):
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    if (backend_dir / "src").exists():
-        print(f"[DEBUG] Copying {backend_dir / 'src'} to {build_dir / 'src'}")
-        shutil.copytree(backend_dir / "src", build_dir / "src")
-    if (backend_dir / "models").exists():
-        print(f"[DEBUG] Copying {backend_dir / 'models'} to {build_dir / 'models'}")
-        shutil.copytree(backend_dir / "models", build_dir / "models")
-    print(f"[DEBUG] Copying {backend_dir / f'{backend}_main.py'} to {build_dir / f'{backend}_main.py'}")
-    shutil.copy(backend_dir / f"{backend}_main.py", build_dir / f"{backend}_main.py")
+    copy_backend_files(backend_dir, build_dir, backend)
 
     venv_dir = build_dir / "venv"
     print(f"[DEBUG] Creating venv at {venv_dir}")
     run(f"\"{sys.executable}\" -m venv \"{venv_dir}\"")
     
-    # Use actual platform to determine pip and pyinstaller paths
     actual_os = platform.system().lower()
     if actual_os == "windows":
         pip = venv_dir / "Scripts" / "pip.exe"
@@ -79,7 +92,7 @@ def package_backend(backend, version, device, os_name):
                 run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.3")
             else:
                 print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
-                return  # Skip GPU builds on macOS
+                return
     elif backend == "face":
         if device == "cpu":
             run(f"\"{pip}\" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
@@ -90,7 +103,7 @@ def package_backend(backend, version, device, os_name):
                 run(f"\"{pip}\" install onnxruntime-gpu")
             else:
                 print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
-                return  # Skip GPU builds on macOS
+                return
 
     entry_script = build_dir / f"{backend}_main.py"
     binary_name = f"{backend}_backend"
@@ -100,7 +113,7 @@ def package_backend(backend, version, device, os_name):
     dist_dir = build_dir / "dist"
     final_build_dir = build_dir / "package"
     print(f"[DEBUG] Creating final build directory: {final_build_dir}")
-    final_build_dir.mkdir()
+    final_build_dir.mkdir(parents=True, exist_ok=True)
 
     binary_suffix = ".exe" if os_name == "windows" else ""
     print(f"[DEBUG] Moving {dist_dir / f'{binary_name}{binary_suffix}'} to {final_build_dir / f'{binary_name}{binary_suffix}'}")
@@ -127,16 +140,17 @@ if __name__ == "__main__":
     print(f"[DEBUG] Running in directory: {os.getcwd()}")
     print(f"[DEBUG] Actual platform: {platform.system().lower()}")
 
-    systems = ["windows", "linux", "macos"]
-    devices = ["cpu", "gpu"]
+    runner = os.environ.get("GITHUB_RUNNER", "ubuntu-latest")
+    os_name = RUNNER_TO_OS.get(runner, 'linux')
+    device = os.environ.get("GITHUB_DEVICE", "cpu")
+    print(f"[DEBUG] Runner: {runner}, Mapped os_name: {os_name}, Device: {device}")
+
+    if os_name == "macos" and device == "gpu":
+        print(f"[SKIP] Skipping for {os_name}/gpu (unsupported).")
+        sys.exit(0)
 
     for backend in BACKENDS:
-        for os_name in systems:
-            if os_name == "macos" and device == "gpu":
-                print(f"[SKIP] Skipping {backend} for {os_name}/gpu (unsupported).")
-                continue
-            for device in devices:
-                try:
-                    package_backend(backend, version, device, os_name)
-                except Exception as e:
-                    print(f"[FAIL] Failed to package {backend} for {os_name}/{device}: {e}")
+        try:
+            package_backend(backend, version, device, os_name)
+        except Exception as e:
+            print(f"[FAIL] Failed to package {backend} for {os_name}/{device}: {e}")

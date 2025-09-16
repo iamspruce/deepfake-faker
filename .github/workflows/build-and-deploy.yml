@@ -7,15 +7,15 @@ on:
 
 jobs:
   package-backends:
-    name: Package ${{ matrix.os }}-${{ matrix.device }} Backends
-    runs-on: ${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'windows' && 'windows-latest' || 'macos-latest' }}
+    name: Package ${{ matrix.runner }}-${{ matrix.device }} Backends
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, windows, macos]
+        runner: [ubuntu-latest, windows-latest, macos-latest]
         device: [cpu, gpu]
         exclude:
-          - os: macos
+          - runner: macos-latest
             device: gpu
 
     steps:
@@ -28,34 +28,40 @@ jobs:
           python-version: "3.10"
 
       - name: Install Linux System Dependencies
-        if: ${{ matrix.os == 'linux' }}
+        if: ${{ matrix.runner == 'ubuntu-latest' }}
         run: |
           sudo apt-get update || { echo "apt-get update failed"; exit 1; }
-          sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev || { echo "apt-get install failed"; exit 1; }
+          sudo apt-get install -y build-essential cmake git wget unzip libsndfile1 ffmpeg libffi-dev libssl-dev portaudio19-dev || { echo "apt-get install failed"; exit 1; }
           if [ "${{ matrix.device }}" == "gpu" ]; then
             sudo apt-get install -y nvidia-cuda-toolkit || { echo "CUDA toolkit install failed"; exit 1; }
           fi
 
       - name: Install Windows System Dependencies
-        if: ${{ matrix.os == 'windows' }}
+        if: ${{ matrix.runner == 'windows-latest' }}
         run: |
-          choco install -y git wget unzip ffmpeg || { echo "choco install failed"; exit 1; }
+          choco install -y git wget unzip ffmpeg portaudio || { echo "choco install failed"; exit 1; }
 
       - name: Install macOS System Dependencies
-        if: ${{ matrix.os == 'macos' }}
+        if: ${{ matrix.runner == 'macos-latest' }}
         run: |
-          brew install git wget unzip libsndfile ffmpeg libomp || { echo "brew install failed"; exit 1; }
+          brew install git wget unzip libsndfile ffmpeg libomp portaudio || { echo "brew install failed"; exit 1; }
+
+      - name: Downgrade pip
+        run: python -m pip install pip==23.3.2
 
       - name: Package Backends with PyInstaller
         run: python scripts/package_zip.py
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUNNER: ${{ matrix.runner }}
+          GITHUB_DEVICE: ${{ matrix.device }}
         working-directory: ${{ github.workspace }}
+        continue-on-error: false
 
       - name: Upload Zip Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: backend-${{ matrix.os }}-${{ matrix.device }}
+          name: backend-${{ matrix.runner }}-${{ matrix.device }}
           path: "*.zip"
         continue-on-error: true
 
@@ -98,7 +104,7 @@ jobs:
       - name: Download Linux GPU zips from artifacts
         uses: actions/download-artifact@v4
         with:
-          name: backend-linux-gpu
+          name: backend-ubuntu-latest-gpu
           path: backends_dist
         continue-on-error: true
 
