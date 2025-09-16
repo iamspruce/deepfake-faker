@@ -6,115 +6,135 @@ BACKENDS = ["face", "voice"]
 
 def run(cmd, cwd=None):
     print(f"[RUN] {cmd}")
-    subprocess.check_call(cmd, shell=True, cwd=cwd)
+    result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[ERROR] Command failed: {cmd}")
+        print(f"Stdout: {result.stdout}")
+        print(f"Stderr: {result.stderr}")
+        raise subprocess.CalledProcessError(result.returncode, cmd)
+    print(f"[SUCCESS] Command completed: {cmd}")
+    return result
 
 def write_start_files(build_dir, backend_name, binary_name):
+    print(f"[DEBUG] Writing start files to {build_dir}")
     start_sh = build_dir / f"start_{backend_name}.sh"
     start_bat = build_dir / f"start_{backend_name}.bat"
     start_sh.write_text(f"#!/bin/bash\ncd $(dirname $0)\nchmod +x ./{binary_name}\n./{binary_name}\n")
     start_bat.write_text(f"@echo off\ncd %~dp0\n{binary_name}.exe\n")
+    print(f"[DEBUG] Wrote {start_sh} and {start_bat}")
 
 def write_version_file(build_dir, version):
+    print(f"[DEBUG] Writing VERSION file to {build_dir}")
     (build_dir / "VERSION").write_text(version)
+    print(f"[DEBUG] Wrote VERSION: {version}")
 
 def package_backend(backend, version, device, os_name):
+    print(f"[DEBUG] Packaging {backend} for {os_name}/{device}, version: {version}")
+    print(f"[DEBUG] ROOT directory: {ROOT}")
     backend_dir = ROOT / "backends" / backend
     build_dir = ROOT / f"build_{backend}_{os_name}_{device}"
     
-    # Clean build folder
+    print(f"[DEBUG] Backend dir: {backend_dir}, Build dir: {build_dir}")
     if build_dir.exists():
+        print(f"[DEBUG] Cleaning build directory: {build_dir}")
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy src/, models/, and the main entry script
     if (backend_dir / "src").exists():
+        print(f"[DEBUG] Copying {backend_dir / 'src'} to {build_dir / 'src'}")
         shutil.copytree(backend_dir / "src", build_dir / "src")
     if (backend_dir / "models").exists():
+        print(f"[DEBUG] Copying {backend_dir / 'models'} to {build_dir / 'models'}")
         shutil.copytree(backend_dir / "models", build_dir / "models")
+    print(f"[DEBUG] Copying {backend_dir / f'{backend}_main.py'} to {build_dir / f'{backend}_main.py'}")
     shutil.copy(backend_dir / f"{backend}_main.py", build_dir / f"{backend}_main.py")
 
-    # Install Python and dependencies in a temp venv for PyInstaller
     venv_dir = build_dir / "venv"
+    print(f"[DEBUG] Creating venv at {venv_dir}")
     run(f"\"{sys.executable}\" -m venv \"{venv_dir}\"")
     
-    # Create OS-specific paths for pip and pyinstaller
-    if os_name == "windows":
+    # Use actual platform to determine pip and pyinstaller paths
+    actual_os = platform.system().lower()
+    if actual_os == "windows":
         pip = venv_dir / "Scripts" / "pip.exe"
         pyinstaller = venv_dir / "Scripts" / "pyinstaller.exe"
     else:
         pip = venv_dir / "bin" / "pip"
         pyinstaller = venv_dir / "bin" / "pyinstaller"
+    print(f"[DEBUG] Actual OS: {actual_os}, pip: {pip}, pyinstaller: {pyinstaller}")
 
     run(f"\"{pip}\" install --upgrade pip setuptools wheel pyinstaller")
 
-    # Install backend-specific dependencies
     requirements_file = backend_dir / "requirements.txt"
+    print(f"[DEBUG] Installing requirements from {requirements_file}")
     run(f"\"{pip}\" install -r \"{requirements_file}\"")
 
-    # Backend-specific installation order for Torch
     if backend == "voice":
         if device == "cpu":
             run(f"\"{pip}\" install torch==2.0.1")
             run(f"\"{pip}\" install fairseq==0.12.2 faiss-cpu==1.7.3")
         else:
-            run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html")
-            run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.3")
+            if actual_os == "windows" or actual_os == "linux":
+                run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html")
+                run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.3")
+            else:
+                print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
+                return  # Skip GPU builds on macOS
     elif backend == "face":
         if device == "cpu":
             run(f"\"{pip}\" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
             run(f"\"{pip}\" install onnxruntime")
         else:
-            run(f"\"{pip}\" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
-            run(f"\"{pip}\" install onnxruntime-gpu")
+            if actual_os == "windows" or actual_os == "linux":
+                run(f"\"{pip}\" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
+                run(f"\"{pip}\" install onnxruntime-gpu")
+            else:
+                print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
+                return  # Skip GPU builds on macOS
 
-    # Build executable with PyInstaller
     entry_script = build_dir / f"{backend}_main.py"
     binary_name = f"{backend}_backend"
+    print(f"[DEBUG] Running PyInstaller on {entry_script} to create {binary_name}")
     run(f"\"{pyinstaller}\" --onefile --name {binary_name} \"{entry_script}\"", cwd=build_dir)
 
-    # Define paths for zipped contents
     dist_dir = build_dir / "dist"
     final_build_dir = build_dir / "package"
+    print(f"[DEBUG] Creating final build directory: {final_build_dir}")
     final_build_dir.mkdir()
 
-    # Move executable
     binary_suffix = ".exe" if os_name == "windows" else ""
+    print(f"[DEBUG] Moving {dist_dir / f'{binary_name}{binary_suffix}'} to {final_build_dir / f'{binary_name}{binary_suffix}'}")
     shutil.move(dist_dir / f"{binary_name}{binary_suffix}", final_build_dir / f"{binary_name}{binary_suffix}")
 
-    # Copy other assets to the final package directory
     if (build_dir / "src").exists():
+        print(f"[DEBUG] Copying {build_dir / 'src'} to {final_build_dir / 'src'}")
         shutil.copytree(build_dir / "src", final_build_dir / "src")
     if (build_dir / "models").exists():
+        print(f"[DEBUG] Copying {build_dir / 'models'} to {final_build_dir / 'models'}")
         shutil.copytree(build_dir / "models", final_build_dir / "models")
     
     write_version_file(final_build_dir, version)
     write_start_files(final_build_dir, backend, binary_name)
 
-    # Prepare zip from the clean 'final_build_dir'
     zip_path = ROOT / f"{backend}-{os_name}-{device}-v{version.lstrip('v')}.zip"
+    print(f"[DEBUG] Creating zip: {zip_path}")
     shutil.make_archive(zip_path.with_suffix(''), 'zip', final_build_dir)
-
     print(f"[DONE] {zip_path}")
 
 if __name__ == "__main__":
     version = os.environ.get("GITHUB_REF_NAME", "dev")
-    if not version:
-        version = "dev"
-
-    # Example: run for a specific target for faster testing
-    # package_backend("face", version, "cpu", "windows")
-    # sys.exit(0)
+    print(f"[DEBUG] Version: {version}")
+    print(f"[DEBUG] Running in directory: {os.getcwd()}")
+    print(f"[DEBUG] Actual platform: {platform.system().lower()}")
 
     systems = ["windows", "linux", "macos"]
     devices = ["cpu", "gpu"]
 
     for backend in BACKENDS:
         for os_name in systems:
-            # Skip unsupported combinations
             if os_name == "macos" and device == "gpu":
-                print(f"[SKIP] Skipping {backend} for {os_name}/{device} (unsupported).")
+                print(f"[SKIP] Skipping {backend} for {os_name}/gpu (unsupported).")
                 continue
-            
             for device in devices:
                 try:
                     package_backend(backend, version, device, os_name)
