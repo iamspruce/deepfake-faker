@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, windows-latest, macos-latest]
-        device: [cpu, gpu]
+        device: [gpu]
         backend: [face, voice]
         exclude:
           - runner: macos-latest
