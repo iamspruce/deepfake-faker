@@ -76,7 +76,7 @@ def package_backend(backend, version, device, os_name):
         pyinstaller = venv_dir / "bin" / "pyinstaller"
     print(f"[DEBUG] Actual OS: {actual_os}, pip: {pip}, pyinstaller: {pyinstaller}")
 
-    run(f"\"{pip}\" install --upgrade pip setuptools wheel pyinstaller")
+    run(f"\"{pip}\" install --force-reinstall pip==23.3.2 setuptools wheel pyinstaller")
 
     requirements_file = backend_dir / "requirements.txt"
     print(f"[DEBUG] Installing requirements from {requirements_file}")
