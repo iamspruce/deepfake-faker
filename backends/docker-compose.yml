@@ -1,0 +1,29 @@
+version: "3.8"
+services:
+  voice-backend:
+    build: ./voice
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./voice:/app # Mounts local code for easy development
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  face-backend:
+    build: ./face
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./face:/app # Mounts local code for easy development
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -1,0 +1,13 @@
+PyQt6
+qtawesome
+opencv-python<4.10
+Pillow
+pyaudio
+pyvirtualcam
+sounddevice
+requests
+aiortc
+aiohttp
+torch
+runpod
+numpy<2

@@ -1,0 +1,69 @@
+# --- Python & Environment ---
+# Ignore the virtual environment folder
+venv/
+env/
+.venv/
+
+# Ignore Python bytecode and cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore distribution/packaging artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+
+# --- AI Models & Data ---
+# Ignore all model files by extension, wherever they are
+**/*.pth
+**/*.pt
+**/*.onnx
+**/*.index
+
+# More robustly, ignore the entire directories where models are downloaded.
+# The application will create and populate these on first run.
+backends/voice/rvc_models/
+backends/face/models/
+backends/face/venv
+backends/face/__pycache__/
+backends/voice/__pycache__/
+
+# --- User-Specific Settings ---
+# Ignore the user settings file. It's good practice to commit a
+# settings.template.json file instead, which users can copy.
+settings.json
+
+
+# --- Test Outputs & Logs ---
+# Ignore any generated audio or log files
+*.log
+test_*.wav
+*_output.wav
+
+
+# --- IDE & Editor Configuration ---
+# Visual Studio Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+
+# --- Operating System Files ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

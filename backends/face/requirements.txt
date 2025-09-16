@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+fastrtc
+opencv-python-headless
+numpy<2
+# IMPORTANT: Use the GPU version of onnxruntime for the cloud
+onnxruntime-gpu
+#onnxruntime #cpu only
+insightface
+gfpgan
+requests
+torch
+opencv-python<4.10
