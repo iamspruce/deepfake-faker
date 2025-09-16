@@ -1,10 +1,10 @@
 # Use the same NVIDIA CUDA base image
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-# Set up the environment and install wget/unzip
+# Set up the environment and install necessary packages
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10.13 python3.10.13-venv python3-pip git libsndfile1 wget unzip \
+    python3.10 python3.10-venv python3-pip git libsndfile1 wget unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory

@@ -4,7 +4,7 @@ FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 # Set up the environment and install wget
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10.3 python3.10.3-venv python3-pip git ffmpeg libsm6 libxext6 wget \
+    python3.10 python3.10-venv python3-pip git libsndfile1 wget unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory

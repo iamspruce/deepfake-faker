@@ -215,9 +215,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("DeepFaker")
         self.setStyleSheet(STYLESheet)
+        self.STYLESheet = STYLESheet # <-- ADD THIS LINE BACK
         self.callbacks = callbacks
-        self.setGeometry(100, 100, 1200, 720) # Adjusted initial size for a better view
-
+        self.setGeometry(100, 100, 1200, 720) 
+        
         # Main layout: Sidebar on the left, main content on the right
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
