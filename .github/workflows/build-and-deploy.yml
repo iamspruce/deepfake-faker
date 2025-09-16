@@ -26,6 +26,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      - run: python -m pip install --upgrade pip==23.3.2 setuptools wheel
 
       # Linux deps
       - name: Install Linux System Dependencies
@@ -49,8 +50,11 @@ jobs:
         run: |
           brew install git wget unzip libsndfile ffmpeg libomp portaudio || { echo "brew install failed"; exit 1; }
 
-      - name: Downgrade pip
-        run: python -m pip install --upgrade pip==23.3.2 setuptools wheel
+      - name: Force pip 23.3.2
+        run: |
+          python -m ensurepip --upgrade
+          python -m pip install --force-reinstall pip==23.3.2 setuptools wheel
+          pip --version
 
       - name: Package Backend with PyInstaller
         run: python scripts/package_zip.py
