@@ -13,6 +13,7 @@ from PyQt6.QtCore import QTimer, QObject, pyqtSignal, QThread
 from gui.pyqt_ui import ConnectionDialog, MainWindow, StartupDialog
 from state_manager import StateManager
 from utils.async_handler import AsyncHandler
+from utils.venv_utils import get_venv_python
 from utils.virtual_devices import VirtualDeviceManager
 from utils.camera_handler import CameraHandler
 from utils.audio_handler import AudioHandler
@@ -188,7 +189,8 @@ class AppController:
             logging.error(f"Failed to terminate processes on port {port}: {str(e)}")
             return False
         return True
-
+    
+   
     def connect_local_backends(self):
         ports = {8080: "voice", 8081: "face"}
         port_status = {}
@@ -214,6 +216,27 @@ class AppController:
             self.state.voice_server_endpoint = "http://localhost:8080"
             self.start_media_stream()
             return
+        
+        def start_backend(self, backend_name: str, port: int):
+            backend_path = os.path.join("backends", backend_name)
+            python_cmd = get_venv_python(backend_path)
+            main_script = f"{backend_name}_main.py"
+
+            process_monitor = ProcessMonitor(
+                [python_cmd, main_script],
+                cwd=backend_path
+            )
+            
+            process_monitor.signals.status_update.connect(
+                lambda msg: self.ui.update_status_message(f"{backend_name.capitalize()} backend: {msg}")
+            )
+            process_monitor.signals.error.connect(
+                lambda msg: self.ui.update_status_message(f"{backend_name.capitalize()} backend error: {msg}", is_error=True)
+            )
+            
+            process_monitor.start()
+            return process_monitor
+
         
         # Collect ports that need action: either not in use (start new) or in use but unhealthy (terminate and start new)
         ports_to_terminate = []
@@ -252,45 +275,12 @@ class AppController:
                 port_status[port]["in_use"] = self.is_port_in_use(port)
         
         try:
-            is_windows = platform.system() == "Windows"
-            venv_activate = "Scripts\\activate.bat" if is_windows else "bin/activate"
-            python_cmd = "python" if is_windows else "python3"
-
-            def start_voice():
-                voice_venv_path = os.path.join("backends", "voice", venv_activate)
-                voice_cwd = os.path.join(os.getcwd(), "backends", "voice")
-                voice_cmd = [python_cmd, "voice_main.py"]
-                if is_windows:
-                    voice_cmd = [voice_venv_path, "&&", python_cmd, "voice_main.py"]
-                self.voice_process_monitor = ProcessMonitor(voice_cmd, cwd=voice_cwd)
-                self.voice_process_monitor.signals.status_update.connect(
-                    lambda msg: self.ui.update_status_message(f"Voice backend: {msg}")
-                )
-                self.voice_process_monitor.signals.error.connect(
-                    lambda msg: self.ui.update_status_message(f"Voice backend error: {msg}", is_error=True)
-                )
-                self.voice_process_monitor.start()
-
-            def start_face():
-                face_venv_path = os.path.join("backends", "face", venv_activate)
-                face_cwd = os.path.join(os.getcwd(), "backends", "face")
-                face_cmd = [python_cmd, "face_main.py"]
-                if is_windows:
-                    face_cmd = [face_venv_path, "&&", python_cmd, "face_main.py"]
-                self.face_process_monitor = ProcessMonitor(face_cmd, cwd=face_cwd)
-                self.face_process_monitor.signals.status_update.connect(
-                    lambda msg: self.ui.update_status_message(f"Face backend: {msg}")
-                )
-                self.face_process_monitor.signals.error.connect(
-                    lambda msg: self.ui.update_status_message(f"Face backend error: {msg}", is_error=True)
-                )
-                self.face_process_monitor.start()
-
+         
             # Start required backends
             if 8080 in ports_to_start:
-                start_voice()
+                self.voice_process_monitor = start_backend("voice", 8080)
             if 8081 in ports_to_start:
-                start_face()
+                self.face_process_monitor = start_backend("face", 8081)
 
             self.state.face_server_endpoint = "http://localhost:8081"
             self.state.voice_server_endpoint = "http://localhost:8080"
@@ -307,9 +297,9 @@ class AppController:
                 start_fn()
 
             if self.voice_process_monitor:
-                self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice", start_voice))
+                self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice",  start_backend("voice", 8080)))
             if self.face_process_monitor:
-                self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_face))
+                self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_backend("voice", 8081)))
 
             self.start_media_stream()
         except Exception as e:
