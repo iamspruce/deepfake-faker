@@ -33,7 +33,7 @@ def write_version_file(build_dir, version):
     (build_dir / "VERSION").write_text(version)
     print(f"[DEBUG] Wrote VERSION: {version}")
     
-IGNORE_DIRS = {"venv", "__pycache__", "tests", "models", "rvc_models"}
+IGNORE_DIRS = {"venv", "__pycache__", "models", "rvc_models"}
 
 def copy_backend_files(backend_dir, build_dir, backend):
     print(f"[DEBUG] Copying files from {backend_dir} to {build_dir} (ignoring models/tests/venv)")
@@ -91,7 +91,7 @@ def package_backend(backend, version, device, os_name):
         else:
             if actual_os == "windows" or actual_os == "linux":
                 run(f"\"{pip}\" install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html --no-cache-dir")
-                run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.4")
+                run(f"\"{pip}\" install fairseq==0.12.2 faiss-gpu==1.7.2")
             else:
                 print(f"[SKIP] Skipping GPU dependencies for {backend} on {actual_os} (unsupported)")
                 return
