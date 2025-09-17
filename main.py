@@ -190,25 +190,43 @@ class AppController:
         return True
 
     def connect_local_backends(self):
-        ports = [8080, 8081]
-        ports_in_use = [port for port in ports if self.is_port_in_use(port)]
+        ports = {8080: "voice", 8081: "face"}
+        port_status = {}
         
-        if ports_in_use:
-            voice_health = self.check_backend_health("http://localhost:8080")
-            face_health = self.check_backend_health("http://localhost:8081")
-            
-            if voice_health and face_health:
-                logging.info("Existing backends on ports 8080/8081 are healthy. Using them.")
-                self.state.face_server_endpoint = "http://localhost:8081"
-                self.state.voice_server_endpoint = "http://localhost:8080"
-                self.start_media_stream()
-                return
-            
+        # Check which ports are in use and their health
+        for port, backend in ports.items():
+            in_use = self.is_port_in_use(port)
+            health_url = f"http://localhost:{port}"
+            healthy = self.check_backend_health(health_url) if in_use else False
+            port_status[port] = {
+                "in_use": in_use,
+                "healthy": healthy,
+                "backend": backend
+            }
+        
+        # Determine if we can use existing backends
+        can_use_voice = port_status[8080]["in_use"] and port_status[8080]["healthy"]
+        can_use_face = port_status[8081]["in_use"] and port_status[8081]["healthy"]
+        
+        if can_use_voice and can_use_face:
+            logging.info("Existing backends on ports 8080/8081 are healthy. Using them.")
+            self.state.face_server_endpoint = "http://localhost:8081"
+            self.state.voice_server_endpoint = "http://localhost:8080"
+            self.start_media_stream()
+            return
+        
+        # Collect ports that need action: either not in use (start new) or in use but unhealthy (terminate and start new)
+        ports_to_terminate = []
+        for port, status in port_status.items():
+            if status["in_use"] and not status["healthy"]:
+                ports_to_terminate.append(port)
+        
+        if ports_to_terminate:
             msg = QMessageBox(self.ui)
             msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setWindowTitle("Ports in Use")
+            msg.setWindowTitle("Ports in Use by Unhealthy Processes")
             msg.setText(
-                f"Ports {', '.join(map(str, ports_in_use))} are in use by other applications.\n\n"
+                f"The following ports are in use by unhealthy backend processes:\n{', '.join(map(str, ports_to_terminate))}\n\n"
                 "To proceed, these processes must be terminated, which may affect other running applications.\n"
                 "Do you want to close these processes and continue?"
             )
@@ -216,18 +234,23 @@ class AppController:
             msg.setDefaultButton(QMessageBox.StandardButton.No)
             
             if msg.exec() != QMessageBox.StandardButton.Yes:
-                self.ui.update_status_message(f"Cannot proceed: Ports {', '.join(map(str, ports_in_use))} in use.", is_error=True)
+                self.ui.update_status_message(f"Cannot proceed: Unhealthy processes on ports {', '.join(map(str, ports_to_terminate))}.", is_error=True)
                 return
             
-            for port in ports_in_use:
+            # Terminate unhealthy processes
+            for port in ports_to_terminate:
                 if not self.terminate_port_processes(port):
-                    self.ui.update_status_message(f"Failed to free port {port}. Close conflicting apps.", is_error=True)
+                    self.ui.update_status_message(f"Failed to free port {port}. Close conflicting apps manually.", is_error=True)
                     return
-            
-            if any(self.is_port_in_use(port) for port in ports):
-                self.ui.update_status_message("Failed to free ports 8080/8081. Close conflicting apps.", is_error=True)
-                return
-
+        
+        # Now start any missing or freshly terminated backends
+        ports_to_start = [port for port, status in port_status.items() if not status["in_use"] or port in ports_to_terminate]
+        
+        if ports_to_start:
+            # Update port_status after terminations
+            for port in ports_to_start:
+                port_status[port]["in_use"] = self.is_port_in_use(port)
+        
         try:
             is_windows = platform.system() == "Windows"
             venv_activate = "Scripts\\activate.bat" if is_windows else "bin/activate"
@@ -263,8 +286,12 @@ class AppController:
                 )
                 self.face_process_monitor.start()
 
-            start_voice()
-            start_face()
+            # Start required backends
+            if 8080 in ports_to_start:
+                start_voice()
+            if 8081 in ports_to_start:
+                start_face()
+
             self.state.face_server_endpoint = "http://localhost:8081"
             self.state.voice_server_endpoint = "http://localhost:8080"
 
@@ -279,14 +306,16 @@ class AppController:
                     self.face_process_monitor = None
                 start_fn()
 
-            self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice", start_voice))
-            self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_face))
+            if self.voice_process_monitor:
+                self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice", start_voice))
+            if self.face_process_monitor:
+                self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_face))
 
             self.start_media_stream()
         except Exception as e:
             logging.error(f"Failed to start local backends: {str(e)}\n{traceback.format_exc()}")
             self.ui.update_status_message(f"Failed to start local backends: {str(e)}", is_error=True)
-
+        
     def handle_deployment_complete(self, voice_url, face_url, voice_id, face_id):
         self.state.voice_server_endpoint = voice_url
         self.state.face_server_endpoint = face_url

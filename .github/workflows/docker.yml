@@ -30,7 +30,7 @@ jobs:
 
       - name: Run Face Backend Tests
         run: |
-          docker run --rm face-backend python backends/face/face_main.py --run-tests
+          docker run --rm face-backend python3 backends/face/face_main.py --run-tests
 
       - name: Run Face Backend Container
         run: |
@@ -72,7 +72,7 @@ jobs:
 
       - name: Run Voice Backend Tests
         run: |
-          docker run --rm voice-backend python backends/voice/voice_main.py --run-tests
+          docker run --rm voice-backend python3 backends/voice/voice_main.py --run-tests
 
       - name: Run Voice Backend Container
         run: |
