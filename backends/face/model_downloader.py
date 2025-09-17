@@ -10,7 +10,7 @@ MODELS_DIR = Path(__file__).resolve().parent / "models"
 
 MODEL_MANIFEST = {
    "inswapper_128_fp16": {
-        "url": "https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128_fp16.onnx",
+        "url": "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx?download=true",
         "description": "The main face swapping model (High Quality).",
     },
     "GFPGANv1.4.pth": {
