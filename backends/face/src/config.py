@@ -27,7 +27,7 @@ APPLE_SILICON_CONFIG = {
     "DEVICE": "mps",
     "SWAPPER_BACKEND": "coreml",
     "EXECUTION_PROVIDERS": ["CoreMLExecutionProvider", "CPUExecutionProvider"],
-    "SWAPPER_MODEL_NAME": "inswapper_128.onnx"
+    "SWAPPER_MODEL_NAME": "inswapper_128_fp16.onnx"
 }
 
 # ✅ NEW: For Intel-based Macs with Core ML support
@@ -43,7 +43,7 @@ CPU_CONFIG = {
     "DEVICE": "cpu",
     "SWAPPER_BACKEND": "onnx",
     "EXECUTION_PROVIDERS": ["CPUExecutionProvider"],
-    "SWAPPER_MODEL_NAME": "inswapper_128.onnx"
+    "SWAPPER_MODEL_NAME": "inswapper_128_fp16.onnx"
 }
 
 # --- Automatic Hardware Detection and Configuration Loading ---

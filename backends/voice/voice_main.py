@@ -21,6 +21,7 @@ logging.basicConfig(
 voice_backend_dir = os.path.dirname(os.path.abspath(__file__))
 if voice_backend_dir not in sys.path:
     sys.path.append(voice_backend_dir)
+    
 
 from rvc_wrapper import RVCWrapper
 from src.download_models import download_pretrained_models, download_voice_model, MODEL_MANIFEST

@@ -9,7 +9,7 @@ MODELS_DIR = Path(__file__).resolve().parent / "models"
 
 
 MODEL_MANIFEST = {
-   "inswapper_128.onnx": {
+   "inswapper_128_fp16": {
         "url": "https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128_fp16.onnx",
         "description": "The main face swapping model (High Quality).",
     },

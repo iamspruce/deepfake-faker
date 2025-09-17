@@ -28,7 +28,7 @@ def get_face_swapper():
     global FACE_SWAPPER
     with THREAD_LOCK:
         if FACE_SWAPPER is None:
-            model_path = os.path.join(config.MODELS_DIR, "inswapper_128.onnx")
+            model_path = os.path.join(config.MODELS_DIR, "inswapper_128_fp16.onnx")
             logger.info(f"Initializing ONNX FaceSwapper: {model_path}")
             FACE_SWAPPER = insightface.model_zoo.get_model(
                 model_path, providers=config.EXECUTION_PROVIDERS
