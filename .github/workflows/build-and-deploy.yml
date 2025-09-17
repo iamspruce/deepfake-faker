@@ -72,55 +72,6 @@ jobs:
         run: |
           brew install git wget unzip libsndfile ffmpeg libomp portaudio
 
-      # ===================================================================
-      # NEW TESTING STEPS START HERE
-      # ===================================================================
-
-      - name: Download Models for Testing # <-- ADDED STEP 1
-        run: |
-          echo "--- Downloading models required for tests ---"
-          # Create directories for models based on test scripts
-          mkdir -p backends/voice/rvc_models/Klee
-          mkdir -p backends/face/models/insightface
-          mkdir -p backends/face/models/gfpgan
-
-          # --- Voice Models ---
-          # NOTE: Replace with your actual model URLs if these are not correct
-          wget -q -O backends/voice/rvc_models/hubert_base.pt https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt
-          wget -q -O backends/voice/rvc_models/Klee/Klee.pth https://huggingface.co/Rejekts/project-rvc-klee/resolve/main/Klee.pth
-
-          # --- Face Models ---
-          wget -q -O backends/face/models/insightface/inswapper_128.onnx https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx
-          wget -q -O backends/face/models/gfpgan/GFPGANv1.4.pth https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth
-          echo "--- Finished downloading models ---"
-
-      - name: Install Dependencies & Run Tests # <-- ADDED STEP 2
-        run: |
-          # Install main requirements first
-          pip install -r backends/${{ matrix.backend }}/requirements.txt
-
-          # Install extra dependencies needed only for testing
-          pip install opencv-python-headless soundfile librosa
-
-          # Run the specific test script based on the matrix backend
-          if [ "${{ matrix.backend }}" == "face" ]; then
-            echo "--- Running Face Backend Tests ---"
-            python backends/face/tests/test_face_processor.py
-          elif [ "${{ matrix.backend }}" == "voice" ]; then
-            echo "--- Running Voice Backend Tests ---"
-            python backends/voice/tests/test_wrapper.py
-          fi
-
-      - name: Clean Up Test Models # <-- ADDED STEP 3
-        run: |
-          echo "--- Removing downloaded models to keep final artifact clean ---"
-          rm -rf backends/voice/rvc_models
-          rm -rf backends/face/models
-
-      # ===================================================================
-      # END OF NEW TESTING STEPS
-      # ===================================================================
-
       - name: Package Backend with PyInstaller
         run: python scripts/package_zip.py
         env:
@@ -187,16 +138,15 @@ jobs:
   test-docker-images:
     name: Test Dockerized Backend ${{ matrix.backend }}
     runs-on: ubuntu-latest
-    needs: docker-builds # This job runs ONLY after images are built and pushed
+    needs: docker-builds
     strategy:
       fail-fast: false
       matrix:
-        # Define backends and their corresponding ports for testing
         include:
           - backend: face
-            port: 8081 # As defined in face_main.py
+            port: 8081
           - backend: voice
-            port: 8080 # As defined in voice_main.py
+            port: 8080
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -219,19 +169,16 @@ jobs:
           sleep 30
 
       - name: Perform Health Check (Smoke Test)
-        # The --fail flag causes curl to exit with an error code if the HTTP request fails (e.g., 404, 503)
         run: |
           echo "Pinging the health check endpoint..."
           curl --fail http://localhost:${{ matrix.port }}/health
 
       - name: Check Container Logs for Errors
-        # This provides valuable debug info if the health check fails
         run: |
           echo "--- Displaying Container Logs ---"
           docker logs test-container
 
       - name: Cleanup Container
-        # The 'if: always()' ensures this step runs even if the health check fails, keeping the runner clean
         if: always()
         run: |
           docker stop test-container

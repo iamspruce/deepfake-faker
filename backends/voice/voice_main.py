@@ -1,6 +1,8 @@
+import argparse
 import asyncio
 import os
 import sys
+import traceback
 import torch
 import numpy as np
 import uvicorn
@@ -150,6 +152,22 @@ class RealtimeRVCHandler(AsyncStreamHandler):
 stream = Stream(handler=RealtimeRVCHandler(), modality="audio", mode="send-receive")
 stream.mount(app)
 
+def run_tests():
+    """Run internal tests for voice backend."""
+    from tests.test_wrapper import test_rvc_wrapper
+    print("[TEST] Running RVC wrapper tests...")
+    test_rvc_wrapper()
+    print("[TEST] All RVC wrapper tests passed.")
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-tests", action="store_true", help="Run internal tests and exit")
+    args, unknown = parser.parse_known_args()
+
+    if args.run_tests:
+        run_tests()
+        sys.exit(0)
+
+    # Original Uvicorn server start
     logging.info("Voice Backend: Uvicorn server starting...")
     uvicorn.run(app, host="127.0.0.1", port=8080, log_level="warning")

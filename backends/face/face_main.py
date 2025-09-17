@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import os
 import sys
@@ -120,6 +121,22 @@ def process_frame_handler(image: np.ndarray) -> np.ndarray:
 stream = Stream(handler=process_frame_handler, modality="video", mode="send-receive")
 stream.mount(app)
 
+def run_tests():
+    """Run internal tests for face backend."""
+    from tests.test_face_processor import test_face_processor
+    print("[TEST] Running face processor tests...")
+    test_face_processor()
+    print("[TEST] All face processor tests passed.")
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-tests", action="store_true", help="Run internal tests and exit")
+    args, unknown = parser.parse_known_args()
+
+    if args.run_tests:
+        run_tests()
+        sys.exit(0)
+
+    # Original Uvicorn server start
     logging.info("Face Backend: Uvicorn server starting...")
     uvicorn.run(app, host="127.0.0.1", port=8081, log_level="warning")

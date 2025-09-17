@@ -7,8 +7,7 @@ from pathlib import Path
 # --- Configuration ---
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 
-# NOTE: The FaceProcessor code expects 'inswapper_128_fp16.onnx'.
-# The user-provided link is for a different file. We will use a link for the correct file.
+
 MODEL_MANIFEST = {
    "inswapper_128.onnx": {
         "url": "https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128_fp16.onnx",
@@ -48,5 +47,4 @@ def download_models():
         else:
             print(f"Model '{model_name}' already exists.")
             
-    # IMPORTANT: A note about GFPGAN
-    print("\nNote: GFPGANv1.4.pth has been downloaded. However, the current FaceProcessor uses a basic sharpening filter for enhancement. To use GFPGAN, the 'enhance_face_region' method in 'face_processor.py' would need to be updated.\n")
+  
