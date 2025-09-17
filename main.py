@@ -118,21 +118,47 @@ class AppController:
         self.state.operating_mode = config.get("mode", "offline")
         if self.state.operating_mode == "cloud":
             self.state.runpod_api_key = config.get("api_key", "")
-            self.start_deployment_worker()
+            # NOTE: Do NOT start worker here—delay to apply_startup_config()
         elif self.state.operating_mode == "custom_urls":
             self.state.face_server_endpoint = config.get("face_url", "")
             self.state.voice_server_endpoint = config.get("voice_url", "")
+            # NOTE: Do NOT start stream here—delay to apply_startup_config()
+            
+    def apply_startup_config(self):
+        """Start services/threads after UI is shown and events processed."""
+        mode = self.state.operating_mode
+        if mode == "cloud":
+            self.ui.update_status_message("Starting cloud deployment...")
+            self.start_deployment_worker()
+        elif mode == "custom_urls":
+            self.ui.update_status_message("Connecting to custom servers...")
             self.start_media_stream()
+        elif mode in ["local_gpu", "local_cpu"]:
+            msg = f"Starting local {mode} backends..."
+            self.ui.update_status_message(msg)
+            self.connect_local_backends()
+        elif mode == "offline":
+            self.ui.update_status_message("Running in offline mode.")
+
+        # For connected modes, update button to "Disconnect" state
+        if mode != "offline":
+            self.ui.connect_button.setText("Disconnect")
+            self.ui.connect_button.setObjectName("disconnect_button")
+            self.ui.setStyleSheet(self.ui.styleSheet())  # Refresh for red styling
 
     def start_deployment_worker(self):
         if self.deployment_worker and self.deployment_worker.isRunning():
             self.deployment_worker.stop()
-            self.deployment_worker.wait()  # Wait for thread to finish
-        self.deployment_worker = DeploymentWorker(self.state.runpod_api_key)
-        self.deployment_worker.status_update.connect(self.ui.update_status_message)
-        self.deployment_worker.error.connect(lambda msg: self.ui.update_status_message(msg, is_error=True))
-        self.deployment_worker.deployment_complete.connect(self.handle_deployment_complete)
-        self.deployment_worker.start()
+            self.deployment_worker.wait()
+        try:
+            self.deployment_worker = DeploymentWorker(self.state.runpod_api_key)
+            self.deployment_worker.status_update.connect(self.ui.update_status_message)
+            self.deployment_worker.error.connect(lambda msg: self.ui.update_status_message(msg, is_error=True))
+            self.deployment_worker.deployment_complete.connect(self.handle_deployment_complete)
+            self.deployment_worker.start()
+        except (ValueError, RuntimeError) as e:
+            logging.error(f"Failed to start deployment worker: {str(e)}")
+            self.ui.update_status_message(f"Error: {str(e)}", is_error=True)
 
     def is_port_in_use(self, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -552,10 +578,6 @@ class AppController:
         self.state.is_push_to_talk_active = is_active
         self.ui.talk_button.setChecked(is_active)
 
-    def run(self):
-        self.ui.show()
-        sys.exit(self.app.exec())
-
     def on_closing(self):
         logging.info("Application closing...")
         if self.deployment_worker and self.deployment_worker.isRunning():
@@ -578,24 +600,38 @@ class AppController:
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     has_gpu = check_gpu()
-    controller = None
+
+    # --- KEY CHANGE 1 ---
+    # Temporarily prevent the app from quitting when the dialog closes
+    app.setQuitOnLastWindowClosed(False)
+
+    config = None
     if has_gpu:
         logging.info("Compatible GPU found. Starting in local GPU mode.")
-        controller = AppController({"mode": "local_gpu"})
-        controller.run()
+        config = {"mode": "local_gpu"}
     else:
         logging.info("No compatible GPU detected. Showing startup options.")
-        def start_controller(config):
-            global controller
-            if config:
-                controller = AppController(config)
-                controller.run()
-            else:
-                logging.info("No startup option selected. Exiting application.")
-                app.quit()
-
         startup_dialog = StartupDialog(stop_thread_callback=lambda: None)
-        startup_dialog.accepted.connect(lambda: start_controller(startup_dialog.result))
-        startup_dialog.rejected.connect(app.quit)
-        startup_dialog.show()
-        app.exec()
+        if startup_dialog.exec():
+            config = startup_dialog.result
+        else:
+            config = None
+
+    if config:
+        controller = AppController(config)  # Sets state but does NOT start threads/services
+        controller.ui.show()
+
+        # Process any pending events (e.g., UI layout/timer init) before starting threads
+        app.processEvents()
+
+        # Apply startup config NOW (after show(), before exec())
+        controller.apply_startup_config()
+
+        # --- KEY CHANGE 2 ---
+        # Restore the default behavior so the app closes when the main window is closed
+        app.setQuitOnLastWindowClosed(True)
+
+        sys.exit(app.exec())
+    else:
+        logging.info("No startup option selected. Exiting application.")
+        sys.exit(0)

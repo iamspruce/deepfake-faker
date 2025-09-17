@@ -7,6 +7,8 @@ class StateManager:
         self.target_face_path = ""
         self.selected_voice = ""
         
+        self.runpod_api_key = None
+        
         # MODIFIED: More granular status management
         self.server_status = "Ready to connect."
         self.voice_backend_status = 'disconnected' # e.g., 'disconnected', 'connecting', 'downloading', 'connected', 'error'

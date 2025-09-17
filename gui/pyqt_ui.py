@@ -1,4 +1,5 @@
 import logging
+import cv2
 import queue
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -54,6 +55,7 @@ STYLESheet = """
     QLabel#stats_value { font-size: 14px; color: #ffffff; font-weight: bold; }
     QLabel#status_message_error { color: #e74c3c; font-weight: bold; }
     QMessageBox {
+        padding: 6px;
         background-color: #2c3e50;
         color: #ecf0f1;
     }
@@ -369,7 +371,7 @@ class MainWindow(QMainWindow):
         self.callbacks = callbacks
         self.input_queue = input_queue
         self.output_queue = output_queue
-        self.setWindowTitle("AI Studio")
+        self.setWindowTitle("DeepFak3r")
         self.setStyleSheet(STYLESheet)
         self.setMinimumSize(800, 600)
         self.installEventFilter(self)
@@ -383,7 +385,7 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        title_label = QLabel("AI Studio")
+        title_label = QLabel("DeepFak3r")
         title_label.setObjectName("title")
         sidebar_layout.addWidget(title_label)
         

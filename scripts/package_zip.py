@@ -1,4 +1,9 @@
-import os, zipfile, platform, subprocess, sys, shutil
+import os
+import platform
+import subprocess
+import sys
+import shutil
+import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +45,6 @@ def copy_backend_files(backend_dir, build_dir):
             shutil.copytree(item, target, dirs_exist_ok=True)
         else:
             shutil.copy(item, target)
-
 
 def package_backend(backend, version, device, os_name):
     backend_dir = ROOT / "backends" / backend
@@ -115,24 +119,18 @@ def package_backend(backend, version, device, os_name):
     write_version_file(final_build_dir, version)
     write_start_files(final_build_dir, backend, binary_name)
 
-    # Zip final package
-    zip_path = ROOT / f"{backend}-{os_name}-{device}-v{version.lstrip('v')}.zip"
-    shutil.make_archive(zip_path.with_suffix(''), 'zip', final_build_dir)
-    print(f"[DONE] {zip_path}")
+    print(f"[DONE] Packaged {backend} to {final_build_dir}")
 
 if __name__ == "__main__":
-    version = os.environ.get("GITHUB_REF_NAME", "dev")
-    runner = os.environ.get("GITHUB_RUNNER", "ubuntu-latest")
-    os_name = RUNNER_TO_OS.get(runner, 'linux')
-    device = os.environ.get("GITHUB_DEVICE", "cpu")
-    backend = os.environ.get("GITHUB_BACKEND")
+    parser = argparse.ArgumentParser(description="Package a backend with PyInstaller")
+    parser.add_argument("--backend", required=True, choices=BACKENDS, help="Backend to package (face or voice)")
+    parser.add_argument("--version", default="dev", help="Version string (default: dev)")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "gpu"], help="Device type (cpu or gpu)")
+    parser.add_argument("--os", default="linux", choices=["linux", "windows", "macos"], help="Operating system")
+    args = parser.parse_args()
 
-    if os_name == "macos" and device == "gpu":
-        print(f"[SKIP] Skipping for {os_name}/gpu (unsupported).")
+    if args.os == "macos" and args.device == "gpu":
+        print(f"[SKIP] Skipping for {args.os}/gpu (unsupported).")
         sys.exit(0)
 
-    if backend:
-        package_backend(backend, version, device, os_name)
-    else:
-        for b in BACKENDS:
-            package_backend(b, version, device, os_name)
+    package_backend(args.backend, args.version, args.device, args.os)

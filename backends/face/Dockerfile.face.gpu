@@ -3,17 +3,52 @@ FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    unzip \
     libsndfile1 \
     ffmpeg \
+    libffi-dev \
+    libssl-dev \
+    portaudio19-dev \
+    python3.10 \
+    python3.10-venv \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY . .
+# Copy backend files
+COPY backends/face /app
+COPY scripts/package_zip.py /app/scripts/package_zip.py
 
+# Create virtual environment
+RUN python3 -m venv /app/venv
+
+# Upgrade pip and install PyInstaller
+RUN /app/venv/bin/pip install --upgrade pip==23.3.2 setuptools wheel
+RUN /app/venv/bin/pip install pyinstaller
+
+# Install backend requirements
+RUN /app/venv/bin/pip install -r requirements.txt --no-cache-dir
+
+# Install GPU-specific dependencies
+RUN /app/venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN /app/venv/bin/pip install onnxruntime-gpu
+
+# Build binary with PyInstaller
+ARG GITHUB_REF_NAME=dev
+RUN /app/venv/bin/python scripts/package_zip.py --backend face --device gpu --os linux --version ${GITHUB_REF_NAME}
+
+# Make start script executable
 RUN chmod +x ./start_face.sh
 
+# Expose port
 EXPOSE 8081
 
+# Default command
 CMD ["./start_face.sh"]
