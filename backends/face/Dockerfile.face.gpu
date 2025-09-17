@@ -1,4 +1,4 @@
-# Use a CUDA runtime base image
+# Use a CUDA runtime base image (GPU support)
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -25,33 +25,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy backend files
-COPY backends/face /app
+# COPY backend into the path the script expects
+COPY backends/face /app/backends/face
+# COPY packaging script
 COPY scripts/package_zip.py /app/scripts/package_zip.py
 
 # Create virtual environment
 RUN python3 -m venv /app/venv
 
-# Upgrade pip and install PyInstaller
+# Upgrade pip and install build tools
 RUN /app/venv/bin/pip install --upgrade pip==23.3.2 setuptools wheel
 RUN /app/venv/bin/pip install pyinstaller
 
-# Install backend requirements
-RUN /app/venv/bin/pip install -r requirements.txt --no-cache-dir
+# Install backend requirements (point to the requirements inside the copied backend)
+RUN /app/venv/bin/pip install -r /app/backends/face/requirements.txt --no-cache-dir
 
-# Install GPU-specific dependencies
+# GPU-specific Python packages (note: ensure these match your CUDA/toolkit version)
 RUN /app/venv/bin/pip install torch
 RUN /app/venv/bin/pip install onnxruntime-gpu
 
-# Build binary with PyInstaller
+# Build/package the backend
 ARG GITHUB_REF_NAME=dev
-RUN /app/venv/bin/python scripts/package_zip.py --backend face --device gpu --os linux --version ${GITHUB_REF_NAME}
+RUN /app/venv/bin/python /app/scripts/package_zip.py --backend face --device gpu --os linux --version ${GITHUB_REF_NAME}
 
-# Make start script executable
-RUN chmod +x ./start_face.sh
+# Make the start script executable
+RUN chmod +x /app/backends/face/start_face.sh
 
-# Expose port
+# Set runtime working dir to the backend and expose port
+WORKDIR /app/backends/face
 EXPOSE 8081
 
-# Default command
+# Run the backend
 CMD ["./start_face.sh"]
