@@ -155,7 +155,6 @@ stream.mount(app)
 
 def run_tests():
     """Run internal tests for voice backend."""
-
     print("[TEST] All RVC wrapper tests passed.")
 
 if __name__ == "__main__":

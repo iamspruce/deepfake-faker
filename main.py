@@ -190,7 +190,6 @@ class AppController:
             return False
         return True
     
-   
     def connect_local_backends(self):
         ports = {8080: "voice", 8081: "face"}
         port_status = {}
@@ -417,13 +416,14 @@ class AppController:
         except Exception as e:
             logging.error(f"Error during disconnect: {str(e)}\n{traceback.format_exc()}")
             self.ui.update_status_message(f"Error during disconnect: {str(e)}", is_error=True)
+    
     def handle_connect_disconnect(self):
         try:
             if self.state.server_status == "Connected.":
                 self.disconnect_all()
                 self.ui.connect_button.setText("Connect")
                 self.ui.connect_button.setObjectName("connect_button")
-                self.ui.setStyleSheet(self.ui.styleSheet())  # Refresh stylesheet
+                self.ui.setStyleSheet(self.ui.styleSheet())  
             else:
                 dialog = ConnectionDialog(has_gpu=check_gpu(), parent=self.ui, stop_thread_callback=self.stop_deployment_worker)
                 if dialog.exec():

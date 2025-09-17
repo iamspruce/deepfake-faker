@@ -2,9 +2,8 @@ name: Build and Test Backends
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "v*"
 
 jobs:
   build-and-test-face:
@@ -32,13 +31,17 @@ jobs:
         run: |
           docker run --rm face-backend python3 face_main.py --run-tests
 
-      - name: Run Face Backend Container
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push Face Backend image
         run: |
-          docker run -d --name face-backend -p 8081:8081 face-backend
-          sleep 15  # give time for model downloads + initialization
-          curl --fail http://localhost:8081/health
-          docker logs face-backend
-          docker stop face-backend
+          IMAGE_NAME=spruceemma/face-backend
+          docker tag face-backend $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:latest
 
       - name: Free Disk Space (after tests)
         if: always()
@@ -74,13 +77,17 @@ jobs:
         run: |
           docker run --rm voice-backend python3 voice_main.py --run-tests
 
-      - name: Run Voice Backend Container
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push Voice Backend image
         run: |
-          docker run -d --name voice-backend -p 8080:8080 voice-backend
-          sleep 15  # allow RVC models to download + initialize
-          curl --fail http://localhost:8080/health
-          docker logs voice-backend
-          docker stop voice-backend
+          IMAGE_NAME=spruceemma/voice-backend
+          docker tag voice-backend $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:latest
 
       - name: Free Disk Space (after tests)
         if: always()
