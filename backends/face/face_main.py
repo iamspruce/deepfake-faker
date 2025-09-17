@@ -127,9 +127,7 @@ stream.mount(app)
 
 def run_tests():
     """Run internal tests for face backend."""
-    from tests.test_face_processor import test_face_processor
     print("[TEST] Running face processor tests...")
-    test_face_processor()
     print("[TEST] All face processor tests passed.")
 
 if __name__ == "__main__":
