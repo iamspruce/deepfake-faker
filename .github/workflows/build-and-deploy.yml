@@ -170,15 +170,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: backend-${{ matrix.backend }}-ubuntu-latest-gpu
-          path: backends_dist/${{ matrix.backend }}
-
-      - run: |
-          cd backends_dist/${{ matrix.backend }}
-          unzip *.zip
-          rm *.zip
+      - name: Copy PyInstaller outputs to Docker context
+        run: |
+          mkdir -p backends_dist/${{ matrix.backend }}
+          cp -r backends/${{ matrix.backend }}/dist/* backends_dist/${{ matrix.backend }}/
 
       - uses: docker/build-push-action@v5
         with:
