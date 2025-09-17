@@ -101,10 +101,14 @@ async def set_source_face(file: UploadFile = File(...)):
 def process_frame_handler(image: np.ndarray) -> np.ndarray:
     fp: FaceProcessor = BACKEND_STATE.get("face_processor")
     if not fp or BACKEND_STATE["status"] != "ready":
-        return image
+        return None
         
     try:
         result_frame, swap_successful = fp.process_frame(image)
+        
+        if not swap_successful or not fp.detect_faces(result_frame):
+            logging.debug("Face detection or swap failed, skipping frame.")
+            return None
         
         if swap_successful and fp.use_face_enhancement:
             faces = fp.detect_faces(result_frame)
@@ -116,7 +120,7 @@ def process_frame_handler(image: np.ndarray) -> np.ndarray:
         return result_frame
     except Exception as e:
         logging.error(f"Error during process_frame: {str(e)}")
-        return image
+        return None
 
 stream = Stream(handler=process_frame_handler, modality="video", mode="send-receive")
 stream.mount(app)

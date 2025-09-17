@@ -8,8 +8,12 @@ import platform
 import logging
 
 from utils.webrtc_handler import WebRTCHandler
+from PyQt6.QtCore import pyqtSignal, QObject
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class MediaServiceSignals(QObject):
+    backend_failure = pyqtSignal(str)  # Signal for backend failure warnings
 
 class MediaService:
     def __init__(self, state, in_q, out_q, audio_in_q, async_handler, virtual_devices, stats_signal):
@@ -17,9 +21,11 @@ class MediaService:
         self.input_queue = in_q
         self.output_queue = out_q
         self.audio_input_queue = audio_in_q
+        self.audio_output_queue = queue.Queue()  # New queue for processed audio
         self.async_handler = async_handler
         self.virtual_devices = virtual_devices
         self.stats_signal = stats_signal
+        self.signals = MediaServiceSignals()
         
         self.running = False
         self.cap = None
@@ -39,6 +45,8 @@ class MediaService:
         self._last_stats_time = time.time()
         self.video_fps_history = []
         self.audio_ps_history = []
+        
+        self.send_audio_to_speaker = False  # Toggle for speaker output
 
         if self.state.operating_mode not in ['offline_passthrough', 'offline']:
             self.face_webrtc = WebRTCHandler(
@@ -113,57 +121,66 @@ class MediaService:
                 if not self.cap:
                     read_failures += 1
                     if read_failures >= max_retries:
-                        logging.error(f"Failed to open camera after {max_retries} attempts.")
+                        logging.error("Max camera open retries reached. Stopping video capture.")
+                        self.signals.backend_failure.emit("Camera failure: Max retries reached.")
                         break
                     time.sleep(1)
                     continue
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
                 read_failures = 0
-
-            ret, frame_bgr = self.cap.read()
-            if not ret or frame_bgr is None:
+            
+            try:
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    read_failures += 1
+                    if read_failures >= max_retries:
+                        logging.error("Max frame read failures reached. Reopening camera.")
+                        self.cap.release()
+                        self.cap = None
+                        self.signals.backend_failure.emit("Camera failure: Unable to read frames.")
+                        continue
+                    time.sleep(0.1)
+                    continue
+                
+                read_failures = 0
+                if self.state.operating_mode != 'offline' and self.state.face_backend_status == 'connected':
+                    try:
+                        self.input_queue.put_nowait(frame)
+                        if self.face_webrtc and self.face_webrtc.is_connected():
+                            self.face_webrtc.send_video_frame(frame)
+                            self._sent_frames += 1
+                    except queue.Full:
+                        logging.warning("Input queue full, dropping video frame.")
+                
+                if self.virtual_devices and self.state.face_backend_status != 'error' and self.state.voice_backend_status != 'error':
+                    self.virtual_devices.send_raw_frame(frame)
+                
+                self._update_stats()
+            except Exception as e:
+                logging.error(f"Error in video capture loop: {str(e)}")
                 read_failures += 1
                 if read_failures >= max_retries:
-                    logging.error(f"Failed to read frame after {max_retries} attempts.")
+                    logging.error("Max errors in video capture loop. Stopping.")
+                    self.signals.backend_failure.emit(f"Video capture error: {str(e)}")
                     break
                 time.sleep(0.1)
-                continue
-            
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            if self.virtual_devices:
-                self.virtual_devices.send_raw_frame(frame_rgb)
-            
-            if self.state.operating_mode in ['offline_passthrough', 'offline']:
-                try:
-                    self.output_queue.put_nowait(Image.fromarray(frame_rgb))
-                    if self.virtual_devices:
-                        self.virtual_devices.send_processed_frame(frame_rgb)
-                    self._sent_frames += 1
-                    self._recv_frames += 1
-                except queue.Full:
-                    logging.warning("Output queue full, dropping video frame.")
-            elif self.face_webrtc and self.face_webrtc.is_connected():
-                self.face_webrtc.send_video_frame(frame_bgr)
-                self._sent_frames += 1
-            
-            self._update_stats()
-            time.sleep(1/30)
-        
-        logging.info("Video capture loop finished.")
-        if self.cap:
-            self.cap.release()
 
     def _audio_sender_loop(self):
+        logging.info("Starting audio sender loop...")
         while self.running:
             try:
-                audio_frame = self.audio_input_queue.get_nowait()
-                if self.voice_webrtc and self.voice_webrtc.is_connected():
-                    self.voice_webrtc.send_audio_frame(audio_frame)
-                    self._sent_audio_packets += 1
+                if self.state.is_push_to_talk_active and self.state.voice_backend_status == 'connected':
+                    audio_frame = self.audio_input_queue.get_nowait()
+                    if self.voice_webrtc and self.voice_webrtc.is_connected():
+                        self.voice_webrtc.send_audio_frame(audio_frame)
+                        self._sent_audio_packets += 1
             except queue.Empty:
                 time.sleep(0.01)
                 continue
             except Exception as e:
-                logging.error(f"Error in audio sender loop: {e}")
+                logging.error(f"Error in audio sender loop: {str(e)}")
+                self.signals.backend_failure.emit(f"Audio sender error: {str(e)}")
 
     def _start_receiving_video(self, track):
         self.video_receiver_thread = threading.Thread(target=self._video_receiver_loop, args=(track,), daemon=True)
@@ -174,22 +191,25 @@ class MediaService:
         try:
             future.result()
         except Exception as e:
-            logging.error(f"Error in video receiver loop: {e}")
+            logging.error(f"Error in video receiver loop: {str(e)}")
+            self.signals.backend_failure.emit(f"Video receiver error: {str(e)}")
 
     async def _video_receiver_loop_async(self, track):
         while self.running:
             try:
                 frame = await track.recv()
                 processed_rgb = frame.to_ndarray(format="rgb24")
-                try:
-                    self.output_queue.put_nowait(Image.fromarray(processed_rgb))
-                    if self.virtual_devices:
-                        self.virtual_devices.send_processed_frame(processed_rgb)
-                    self._recv_frames += 1
-                except queue.Full:
-                    logging.warning("Output queue full, dropping received video frame.")
+                if self.state.face_backend_status != 'error' and self.state.voice_backend_status != 'error':
+                    try:
+                        self.output_queue.put_nowait(Image.fromarray(processed_rgb))
+                        if self.virtual_devices:
+                            self.virtual_devices.send_processed_frame(processed_rgb)
+                        self._recv_frames += 1
+                    except queue.Full:
+                        logging.warning("Output queue full, dropping received video frame.")
             except Exception as e:
-                logging.error(f"Error receiving video frame: {e}")
+                logging.error(f"Error receiving video frame: {str(e)}")
+                self.signals.backend_failure.emit(f"Video receiver error: {str(e)}")
                 break
 
     def _start_receiving_audio(self, track):
@@ -201,15 +221,25 @@ class MediaService:
         try:
             future.result()
         except Exception as e:
-            logging.error(f"Error in audio receiver loop: {e}")
-        
+            logging.error(f"Error in audio receiver loop: {str(e)}")
+            self.signals.backend_failure.emit(f"Audio receiver error: {str(e)}")
+
     async def _audio_receiver_loop_async(self, track):
         while self.running:
             try:
                 audio_frame = await track.recv()
-                self._recv_audio_packets += 1
+                audio_samples = audio_frame.to_ndarray()
+                if self.state.voice_backend_status != 'error' and self.state.face_backend_status != 'error':
+                    try:
+                        self.audio_output_queue.put_nowait(audio_samples)
+                        if self.virtual_devices:
+                            self.virtual_devices.send_processed_audio(audio_samples, self.send_audio_to_speaker)
+                        self._recv_audio_packets += 1
+                    except queue.Full:
+                        logging.warning("Audio output queue full, dropping received audio frame.")
             except Exception as e:
-                logging.error(f"Error receiving audio frame: {e}")
+                logging.error(f"Error receiving audio frame: {str(e)}")
+                self.signals.backend_failure.emit(f"Audio receiver error: {str(e)}")
                 break
 
     def _update_stats(self):

@@ -4,100 +4,93 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-RUNPOD_API_BASE = "https://api.runpod.io/v2"
-
 class RunPodManager:
     def __init__(self, api_key):
-        self.api_key = api_key
-        self.headers = {"Authorization": f"Bearer {api_key}"}
-
-    def _get_endpoint_by_name(self, name):
+        self.base_url = "https://api.runpod.io/v2"
+        self.session = requests.Session()
+        self.session.headers.update({"Authorization": f"Bearer {api_key}"})
         try:
-            response = requests.get(f"{RUNPOD_API_BASE}/endpoints", headers=self.headers)
+            response = self.session.get(f"{self.base_url}/status")
             response.raise_for_status()
-            endpoints = response.json()
+        except requests.HTTPError as e:
+            logging.error(f"RunPod API v2 unavailable: {str(e)}. See https://docs.runpod.io.")
+            raise RuntimeError("RunPod API v2 is unavailable.")
+
+    def get_existing_endpoint(self, name):
+        try:
+            response = self.session.get(f"{self.base_url}/endpoints")
+            response.raise_for_status()
+            endpoints = response.json().get('endpoints', [])
             for endpoint in endpoints:
                 if endpoint['name'] == name:
-                    return endpoint
+                    return endpoint['id']
             return None
         except Exception as e:
-            logging.error(f"Could not list endpoints: {str(e)}")
+            logging.error(f"Failed to get endpoints: {str(e)}")
             return None
 
-    def deploy_and_poll_endpoint(self, name, image, port, gpu_id="NVIDIA RTX 3090", max_retries=3, timeout_seconds=600):
-        endpoint_id = None
-        for attempt in range(max_retries):
+    def create_template(self, name, image_name, port):
+        try:
+            payload = {
+                "name": f"{name}-template",
+                "imageName": image_name,
+                "containerDiskInGb": 15,
+                "ports": f"{port}/http",
+                "isServerless": True
+            }
+            response = self.session.post(f"{self.base_url}/templates", json=payload)
+            response.raise_for_status()
+            return response.json()['id']
+        except requests.HTTPError as e:
+            logging.error(f"Failed to create template {name}: {str(e)}")
+            raise
+
+    def create_endpoint(self, name, template_id):
+        gpu_types = ["NVIDIA RTX 3090", "NVIDIA A100 40GB", "NVIDIA A40"]
+        for gpu in gpu_types:
             try:
-                existing_endpoint = self._get_endpoint_by_name(name)
-                if existing_endpoint:
-                    logging.info(f"Found existing endpoint '{name}' with ID: {existing_endpoint['id']}")
-                    endpoint_id = existing_endpoint['id']
-                else:
-                    logging.info(f"No existing endpoint found. Creating new endpoint '{name}'...")
-                    template_payload = {
-                        "name": f"{name}-template",
-                        "imageName": image,
-                        "containerDiskInGb": 15,
-                        "ports": f"{port}/http",
-                        "isServerless": True
-                    }
-                    response = requests.post(f"{RUNPOD_API_BASE}/templates", headers=self.headers, json=template_payload)
-                    response.raise_for_status()
-                    template_id = response.json()['id']
-                    logging.info(f"Template '{name}-template' created with ID: {template_id}")
-                    endpoint_payload = {
-                        "name": name,
-                        "templateId": template_id,
-                        "gpuIds": gpu_id,
-                        "scaler": {"min": 0, "max": 1}
-                    }
-                    response = requests.post(f"{RUNPOD_API_BASE}/endpoints", headers=self.headers, json=endpoint_payload)
-                    response.raise_for_status()
-                    endpoint_id = response.json()['id']
-                    logging.info(f"Endpoint '{name}' created with ID: {endpoint_id}")
+                payload = {
+                    "name": name,
+                    "templateId": template_id,
+                    "gpuIds": gpu,
+                    "scaler": {"min": 0, "max": 1}
+                }
+                response = self.session.post(f"{self.base_url}/endpoints", json=payload)
+                response.raise_for_status()
+                return response.json()['id']
+            except requests.HTTPError as e:
+                logging.warning(f"GPU {gpu} unavailable for {name}: {str(e)}")
+                continue
+        raise RuntimeError(f"No available GPUs for {name}. Check RunPod credits or try later.")
 
-                start_time = time.time()
-                backoff = 10.0
-                while time.time() - start_time < timeout_seconds:
-                    logging.info(f"Polling status for endpoint '{name}' (attempt {attempt+1}/{max_retries})...")
-                    response = requests.get(f"{RUNPOD_API_BASE}/endpoints/{endpoint_id}", headers=self.headers)
-                    if response.status_code != 200:
-                        time.sleep(backoff)
-                        backoff = min(backoff * 1.5, 30.0)
-                        continue
+    def poll_endpoint(self, endpoint_id, max_timeout=600, poll_interval=10):
+        start_time = time.time()
+        while time.time() - start_time < max_timeout:
+            try:
+                response = self.session.get(f"{self.base_url}/endpoints/{endpoint_id}")
+                response.raise_for_status()
+                data = response.json()
+                if data.get('workers', []) and data['workers'][0]['status'] == 'READY':
+                    return data['workers'][0]['publicUrl']
+            except requests.HTTPError:
+                pass
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 30)
+        raise TimeoutError(f"Endpoint {endpoint_id} not ready after {max_timeout} seconds.")
 
-                    endpoint_status = response.json()
-                    workers = endpoint_status.get("workers", [])
-                    
-                    if workers and workers[0]['status'] == "READY":
-                        url = workers[0].get("publicUrl")
-                        if url:
-                            logging.info(f"Endpoint '{name}' is READY. URL: {url}")
-                            return url, endpoint_id
-                    time.sleep(backoff)
-                    backoff = min(backoff * 1.5, 30.0)
-                
-                logging.warning(f"Endpoint '{name}' did not become ready within {timeout_seconds} seconds.")
-            except Exception as e:
-                logging.error(f"Deployment attempt {attempt+1} failed: {str(e)}")
-                if attempt == max_retries - 1:
-                    raise
-                time.sleep(5)
-        raise TimeoutError(f"Failed to deploy endpoint '{name}' after {max_retries} attempts.")
+    def deploy_and_poll_endpoint(self, endpoint_name, image_name, port):
+        endpoint_id = self.get_existing_endpoint(endpoint_name)
+        if not endpoint_id:
+            template_id = self.create_template(endpoint_name, image_name, port)
+            endpoint_id = self.create_endpoint(endpoint_name, template_id)
+        public_url = self.poll_endpoint(endpoint_id)
+        return public_url, endpoint_id
 
     def terminate_endpoints(self, endpoint_ids):
-        if not endpoint_ids:
-            return
-
-        logging.info(f"Terminating RunPod endpoints: {endpoint_ids}")
         for endpoint_id in endpoint_ids:
-            if not endpoint_id:
-                continue
             try:
-                response = requests.delete(f"{RUNPOD_API_BASE}/endpoints/{endpoint_id}", headers=self.headers)
-                if response.status_code == 200:
-                    logging.info(f"Successfully terminated endpoint {endpoint_id}.")
-                else:
-                    logging.warning(f"Could not terminate endpoint {endpoint_id}. Status: {response.status_code}, Response: {response.text}")
-            except Exception as e:
-                logging.error(f"Error terminating endpoint {endpoint_id}: {str(e)}")
+                response = self.session.delete(f"{self.base_url}/endpoints/{endpoint_id}")
+                response.raise_for_status()
+                logging.info(f"Terminated endpoint {endpoint_id}")
+            except requests.HTTPError as e:
+                logging.error(f"Failed to terminate endpoint {endpoint_id}: {str(e)}")

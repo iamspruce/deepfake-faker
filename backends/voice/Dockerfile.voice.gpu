@@ -4,7 +4,7 @@ FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 # Non-interactive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies (removed build tools/python-dev/git/pkg-config as they're not needed for a bundled binary)
+# Install runtime dependencies (only what bundled binary needs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     ffmpeg \
@@ -13,14 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
-# Copy the entire backend (executable, models, src, etc.) from the build context
+# Copy everything from build context (this will include bundled binary + start script)
 COPY . .
 
-# Ensure the start script is executable
+# Make sure start script is executable
 RUN chmod +x ./start_voice.sh
 
-# Expose port
-EXPOSE 8081
+# Expose correct port for voice backend
+EXPOSE 8080
 
-# Start script
+# Default command
 CMD ["./start_voice.sh"]

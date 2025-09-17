@@ -38,9 +38,6 @@ class StateManager:
         self.video_stats = {"sent_fps": 0.0, "recv_fps": 0.0, "rtt_ms": 0.0}
         self.audio_stats = {"sent_ps": 0.0, "recv_ps": 0.0, "rtt_ms": 0.0}
         
-        # NEW: Separate endpoints for cloud mode
-        self.face_server_endpoint = None
-        self.voice_server_endpoint = None
 
     # NEW: Helper methods to check overall connection state
     def is_fully_connected(self):

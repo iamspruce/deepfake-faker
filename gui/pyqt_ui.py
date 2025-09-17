@@ -1,11 +1,21 @@
+import logging
+import queue
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QDialog, QFrame, QLineEdit, QCheckBox, QSpacerItem, QSizePolicy,
     QRadioButton, QProgressBar, QMessageBox
 )
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QMouseEvent, QPalette, QColor
 import qtawesome as qta
+from PIL import Image
+import numpy as np
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler('app.log'), logging.StreamHandler()]
+)
 
 STYLESheet = """
     QWidget {
@@ -43,6 +53,23 @@ STYLESheet = """
     QLabel#stats_label { font-size: 12px; color: #bdc3c7; }
     QLabel#stats_value { font-size: 14px; color: #ffffff; font-weight: bold; }
     QLabel#status_message_error { color: #e74c3c; font-weight: bold; }
+    QMessageBox {
+        background-color: #2c3e50;
+        color: #ecf0f1;
+    }
+    QMessageBox QLabel {
+        color: #ecf0f1;
+    }
+    QMessageBox QPushButton {
+        background-color: #3498db;
+        color: white;
+        border: none;
+        padding: 8px;
+        border-radius: 3px;
+    }
+    QMessageBox QPushButton:hover {
+        background-color: #4ea8e1;
+    }
     QPushButton {
         background-color: #3498db;
         color: white;
@@ -100,6 +127,7 @@ STYLESheet = """
         border: 1px solid #7f8c8d;
         border-radius: 5px;
         text-align: center;
+        color: #ecf0f1;
     }
     QProgressBar::chunk {
         background-color: #3498db;
@@ -121,14 +149,124 @@ class ConnectionDialog(QDialog):
         if has_gpu:
             modes.insert(0, "Local GPU")
         modes.append("RunPod Cloud")
+        modes.append("Custom URLs")
         self.mode_selector.addItems(modes)
         self.mode_selector.setToolTip("Select the processing mode for AI computations")
         self.layout.addWidget(self.mode_selector)
         self.api_key_label = QLabel("RunPod API Key:")
-        self.api_key_entry = QLineEdit()
-        self.api_key_entry.setToolTip("Enter your RunPod API key for cloud deployment")
+        self.runpod_entry = QLineEdit()
+        self.runpod_entry.setPlaceholderText("Enter your RunPod API key")
+        self.runpod_entry.setEchoMode(QLineEdit.EchoMode.Password)
+        self.face_url_label = QLabel("Face Backend URL:")
+        self.face_url_entry = QLineEdit()
+        self.face_url_entry.setPlaceholderText("e.g., http://localhost:8081")
+        self.voice_url_label = QLabel("Voice Backend URL:")
+        self.voice_url_entry = QLineEdit()
+        self.voice_url_entry.setPlaceholderText("e.g., http://localhost:8080")
+        self.runpod_radio = QRadioButton("Use RunPod Cloud")
+        self.custom_url_radio = QRadioButton("Use Custom URLs")
+        self.force_local_radio = QRadioButton("Force Local CPU")
+        self.layout.addWidget(self.runpod_radio)
         self.layout.addWidget(self.api_key_label)
-        self.layout.addWidget(self.api_key_entry)
+        self.layout.addWidget(self.runpod_entry)
+        self.layout.addWidget(self.custom_url_radio)
+        self.layout.addWidget(self.face_url_label)
+        self.layout.addWidget(self.face_url_entry)
+        self.layout.addWidget(self.voice_url_label)
+        self.layout.addWidget(self.voice_url_entry)
+        self.layout.addWidget(self.force_local_radio)
+        confirm_button = QPushButton("Confirm")
+        confirm_button.clicked.connect(self.accept)
+        self.layout.addWidget(confirm_button)
+        self.result = None
+        self.temp_result = None
+
+        self.mode_selector.currentTextChanged.connect(self.update_ui)
+        self.runpod_radio.toggled.connect(self.update_ui)
+        self.custom_url_radio.toggled.connect(self.update_ui)
+        self.force_local_radio.toggled.connect(self.update_ui)
+        self.update_ui()
+
+    def update_ui(self):
+        is_runpod = self.mode_selector.currentText() == "RunPod Cloud" or self.runpod_radio.isChecked()
+        is_custom = self.mode_selector.currentText() == "Custom URLs" or self.custom_url_radio.isChecked()
+        is_force_local = self.mode_selector.currentText() == "Offline" or self.force_local_radio.isChecked()
+        self.api_key_label.setVisible(is_runpod)
+        self.runpod_entry.setVisible(is_runpod)
+        self.face_url_label.setVisible(is_custom)
+        self.face_url_entry.setVisible(is_custom)
+        self.voice_url_label.setVisible(is_custom)
+        self.voice_url_entry.setVisible(is_custom)
+        self.runpod_radio.setVisible(self.mode_selector.currentText() != "Offline")
+        self.custom_url_radio.setVisible(self.mode_selector.currentText() != "Offline")
+        self.force_local_radio.setVisible(self.mode_selector.currentText() != "Offline")
+
+    def show_confirmation(self, mode, **kwargs):
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Confirm Deployment")
+        if mode == "cloud":
+            msg.setText(
+                "You are about to deploy cloud backends on RunPod using your API key.\n\n"
+                "What happens next:\n"
+                "- Two serverless endpoints (voice and face) will be created.\n"
+                "- This may take 5-15 minutes and will incur costs (~$0.20-$1.00/hour per endpoint, ~$0.01-0.05 per cold start).\n"
+                "- The app will poll until ready and connect automatically.\n"
+                "- Endpoints will be terminated when you close the app.\n\n"
+                "Proceed? (You can cancel to go back.)"
+            )
+            msg.setInformativeText(
+                "Note: Ensure sufficient credits in your RunPod account (https://runpod.io/console/billing)."
+            )
+            self.temp_result = {"mode": mode, "api_key": kwargs["api_key"]}
+        elif mode == "custom_urls":
+            msg.setText(
+                "You are about to connect to your custom server URLs.\n\n"
+                "What happens next:\n"
+                "- The app will attempt to connect to the provided face and voice URLs.\n"
+                "- Health checks will run periodically.\n"
+                "- No new deployments will occur.\n\n"
+                "Proceed?"
+            )
+            self.temp_result = {"mode": mode, "face_url": kwargs["face_url"], "voice_url": kwargs["voice_url"]}
+        elif mode == "local_cpu":
+            msg.setText(
+                "You are about to force local CPU mode (no GPU detected).\n\n"
+                "What happens next:\n"
+                "- Backends will run locally on your CPU (may be slow or unstable).\n"
+                "- Virtual devices and media services will start.\n\n"
+                "Proceed? (Performance may be poor.)"
+            )
+            self.temp_result = {"mode": mode}
+        
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+        
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            self.result = self.temp_result
+            super().accept()
+        else:
+            pass
+
+    def accept(self):
+        if self.runpod_radio.isChecked():
+            api_key = self.runpod_entry.text().strip()
+            if not api_key:
+                self.runpod_entry.setPlaceholderText("API Key required!")
+                return
+            self.show_confirmation("cloud", api_key=api_key)
+        elif self.custom_url_radio.isChecked():
+            face_url = self.face_url_entry.text().strip()
+            voice_url = self.voice_url_entry.text().strip()
+            if not (face_url and voice_url):
+                if not face_url:
+                    self.face_url_entry.setPlaceholderText("Face URL required!")
+                if not voice_url:
+                    self.voice_url_entry.setPlaceholderText("Voice URL required!")
+                return
+            self.show_confirmation("custom_urls", face_url=face_url, voice_url=voice_url)
+        elif self.force_local_radio.isChecked():
+            self.show_confirmation("local_cpu")
 
 class StartupDialog(QDialog):
     def __init__(self, parent=None):
@@ -211,185 +349,156 @@ class StartupDialog(QDialog):
         super().accept()
 
 class MainWindow(QMainWindow):
-    def __init__(self, callbacks):
+    def __init__(self, callbacks, input_queue=None, output_queue=None):
         super().__init__()
-        self.setWindowTitle("DeepFaker")
-        self.setStyleSheet(STYLESheet)
-        self.STYLESheet = STYLESheet # <-- ADD THIS LINE BACK
         self.callbacks = callbacks
-        self.setGeometry(100, 100, 1200, 720) 
-        
-        # Main layout: Sidebar on the left, main content on the right
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.main_layout = QHBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
-
-        # --- Sidebar (Left Panel) ---
-        self._setup_sidebar()
-
-        # --- Main Content (Right Panel) ---
-        # This area will contain the video panel and the stats panel below it
-        main_content_widget = QWidget()
-        main_content_layout = QVBoxLayout(main_content_widget)
-        main_content_layout.setContentsMargins(10, 10, 10, 10)
-        main_content_layout.setSpacing(10)
-
-        # Video Panel (the main view)
-        self.video_panel = QLabel()
-        self.video_panel.setObjectName("video_panel")
-        self.video_panel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # We set a plain black background to see the frame clearly
-        self.video_panel.setPixmap(QPixmap(640, 480))
-        self.video_panel.pixmap().fill(QColor("black"))
-
-        # Add video panel to the main content area
-        main_content_layout.addWidget(self.video_panel, 1) # The '1' makes it expand
-
-        # Stats Panel (below the video)
-        self._setup_stats_panel()
-        main_content_layout.addWidget(self.stats_frame) # Add the stats frame here
-
-        # Add the entire main content area to the main window layout
-        self.main_layout.addWidget(main_content_widget, 1)
-
-        # --- Picture-in-Picture (PiP) View ---
-        # This is a child of the main video panel so it can be overlaid
-        self.pip_view = QLabel(self.video_panel)
-        self.pip_view.setObjectName("pip_view")
-        self.pip_view.setFixedSize(200, 150)
-        self.pip_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Set a plain black background to see the PiP frame
-        self.pip_view.setPixmap(QPixmap(200, 150))
-        self.pip_view.pixmap().fill(QColor("black"))
-        self.pip_view.show() # Make it visible
-
-        # Install event filter for spacebar key presses
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        self.setWindowTitle("AI Studio")
+        self.setStyleSheet(STYLESheet)
+        self.setMinimumSize(800, 600)
         self.installEventFilter(self)
-
-    def _setup_sidebar(self):
-        """Creates and configures all widgets for the sidebar."""
-        self.sidebar = QFrame()
-        self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(300)
-        self.sidebar_layout = QVBoxLayout(self.sidebar)
-        self.sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.sidebar_layout.setContentsMargins(10, 0, 10, 10)
-        self.sidebar_layout.setSpacing(10)
-
-        self.title_label = QLabel("DeepFaker")
-        self.title_label.setObjectName("title")
-        self.sidebar_layout.addWidget(self.title_label)
-
-        self.status_message = QLabel("Ready to connect.")
-        self.status_message.setWordWrap(True)
-        self.status_progress = QProgressBar()
-        self.status_progress.setRange(0, 0)
-        self.status_progress.setVisible(False)
-        self.sidebar_layout.addWidget(self.status_message)
-        self.sidebar_layout.addWidget(self.status_progress)
-
+        
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QHBoxLayout(main_widget)
+        
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        title_label = QLabel("AI Studio")
+        title_label.setObjectName("title")
+        sidebar_layout.addWidget(title_label)
+        
         self.connect_button = QPushButton("Connect")
+        self.connect_button.setObjectName("connect_button")
         self.connect_button.clicked.connect(self.callbacks["on_connect_disconnect"])
-        self.sidebar_layout.addWidget(self.connect_button)
-
-        # Create a frame for better grouping of settings
-        settings_frame = QFrame()
-        settings_frame.setObjectName("settings_group")
-        settings_layout = QVBoxLayout(settings_frame)
-
+        sidebar_layout.addWidget(self.connect_button)
+        
+        settings_group = QFrame()
+        settings_group.setObjectName("settings_group")
+        settings_layout = QVBoxLayout(settings_group)
+        
+        resolution_label = QLabel("Resolution:")
         self.resolution_selector = QComboBox()
         self.resolution_selector.addItems(["480p", "720p", "1080p"])
         self.resolution_selector.currentTextChanged.connect(self.callbacks["on_resolution_change"])
-        settings_layout.addWidget(QLabel("Resolution:"))
+        settings_layout.addWidget(resolution_label)
         settings_layout.addWidget(self.resolution_selector)
-
+        
+        camera_label = QLabel("Camera:")
         self.camera_selector = QComboBox()
         self.camera_selector.currentTextChanged.connect(self.callbacks["on_camera_change"])
-        settings_layout.addWidget(QLabel("Camera:"))
+        settings_layout.addWidget(camera_label)
         settings_layout.addWidget(self.camera_selector)
         
-        self.refresh_cameras_button = QPushButton("Refresh Cameras")
-        self.refresh_cameras_button.clicked.connect(self.callbacks["on_refresh_cameras"])
-        settings_layout.addWidget(self.refresh_cameras_button)
-
+        refresh_cameras = QPushButton("Refresh Cameras")
+        refresh_cameras.clicked.connect(self.callbacks["on_refresh_cameras"])
+        settings_layout.addWidget(refresh_cameras)
+        
+        input_device_label = QLabel("Input Device:")
         self.input_device_selector = QComboBox()
         self.input_device_selector.currentTextChanged.connect(self.callbacks["on_input_device_change"])
-        settings_layout.addWidget(QLabel("Input Device:"))
+        settings_layout.addWidget(input_device_label)
         settings_layout.addWidget(self.input_device_selector)
-
+        
+        output_device_label = QLabel("Output Device:")
         self.output_device_selector = QComboBox()
         self.output_device_selector.currentTextChanged.connect(self.callbacks["on_output_device_change"])
-        settings_layout.addWidget(QLabel("Output Device:"))
+        settings_layout.addWidget(output_device_label)
         settings_layout.addWidget(self.output_device_selector)
         
-        self.refresh_audio_button = QPushButton("Refresh Audio Devices")
-        self.refresh_audio_button.clicked.connect(self.callbacks["on_refresh_audio"])
-        settings_layout.addWidget(self.refresh_audio_button)
-
-        self.sidebar_layout.addWidget(settings_frame)
-
-        self.face_button = QPushButton("Select Target Face")
-        self.face_button.clicked.connect(self.callbacks["on_select_face"])
-        self.sidebar_layout.addWidget(self.face_button)
-
-        self.enhancement_check = QCheckBox("Enable Face Enhancement")
-        self.enhancement_check.stateChanged.connect(self.callbacks["on_enhancement_toggle"])
-        self.sidebar_layout.addWidget(self.enhancement_check)
+        refresh_audio = QPushButton("Refresh Audio")
+        refresh_audio.clicked.connect(self.callbacks["on_refresh_audio"])
+        settings_layout.addWidget(refresh_audio)
         
+        face_select_button = QPushButton("Select Target Face")
+        face_select_button.clicked.connect(self.callbacks["on_select_face"])
+        settings_layout.addWidget(face_select_button)
+        
+        enhancement_cb = QCheckBox("Enable Face Enhancement")
+        enhancement_cb.stateChanged.connect(self.callbacks["on_enhancement_toggle"])
+        settings_layout.addWidget(enhancement_cb)
+        
+        voice_label = QLabel("AI Voice:")
         self.voice_selector = QComboBox()
         self.voice_selector.currentTextChanged.connect(self.callbacks["on_voice_change"])
-        self.sidebar_layout.addWidget(QLabel("Voice:"))
-        self.sidebar_layout.addWidget(self.voice_selector)
-
-        self.talk_button = QPushButton("Talk (Hold Space)")
+        settings_layout.addWidget(voice_label)
+        settings_layout.addWidget(self.voice_selector)
+        
+        self.talk_button = QPushButton("Push to Talk")
         self.talk_button.setCheckable(True)
         self.talk_button.setObjectName("talk_button")
-        self.sidebar_layout.addWidget(self.talk_button)
+        settings_layout.addWidget(self.talk_button)
         
-        self.sidebar_layout.addStretch(1) # Pushes everything up
+        speaker_cb = QCheckBox("Enable Speaker Output")
+        speaker_cb.stateChanged.connect(self.callbacks.get("on_speaker_toggle", lambda x: None))
+        settings_layout.addWidget(speaker_cb)
         
-        self.main_layout.addWidget(self.sidebar)
-
-    def _setup_stats_panel(self):
-        """Creates the horizontal stats panel for the main content area."""
-        self.stats_frame = QFrame()
-        # Use a QHBoxLayout to place stats groups side-by-side
-        stats_layout = QHBoxLayout(self.stats_frame)
-        stats_layout.setContentsMargins(0,0,0,0)
-
-        # Video Stats Group
+        sidebar_layout.addWidget(settings_group)
+        sidebar_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        main_layout.addWidget(sidebar)
+        
+        content_layout = QVBoxLayout()
+        self.video_panel = QLabel()
+        self.video_panel.setObjectName("video_panel")
+        self.video_panel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        content_layout.addWidget(self.video_panel)
+        
+        self.pip_view = QLabel()
+        self.pip_view.setObjectName("pip_view")
+        self.pip_view.setFixedSize(160, 120)
+        self.pip_view.setParent(self.video_panel)
+        
+        stats_layout = QHBoxLayout()
         video_stats_group = QFrame()
         video_stats_group.setObjectName("settings_group")
         video_stats_vlayout = QVBoxLayout(video_stats_group)
-        video_stats_vlayout.addWidget(QLabel("<b>Video Stats</b>"))
         self.video_stats_labels = {
-            "sent_fps": QLabel("Sent FPS: 0.0"), "recv_fps": QLabel("Recv FPS: 0.0"),
+            "sent_fps": QLabel("Sent FPS: 0.0"),
+            "recv_fps": QLabel("Recv FPS: 0.0"),
             "rtt_ms": QLabel("RTT: 0.0 ms")
         }
         for label in self.video_stats_labels.values():
             label.setObjectName("stats_value")
             video_stats_vlayout.addWidget(label)
         stats_layout.addWidget(video_stats_group)
-
-        # Audio Stats Group
+        
         audio_stats_group = QFrame()
         audio_stats_group.setObjectName("settings_group")
         audio_stats_vlayout = QVBoxLayout(audio_stats_group)
-        audio_stats_vlayout.addWidget(QLabel("<b>Audio Stats</b>"))
         self.audio_stats_labels = {
-            "sent_ps": QLabel("Sent PS: 0.0"), "recv_ps": QLabel("Recv PS: 0.0"),
+            "sent_ps": QLabel("Sent PS: 0.0"),
+            "recv_ps": QLabel("Recv PS: 0.0"),
             "rtt_ms": QLabel("RTT: 0.0 ms")
         }
         for label in self.audio_stats_labels.values():
             label.setObjectName("stats_value")
             audio_stats_vlayout.addWidget(label)
         stats_layout.addWidget(audio_stats_group)
+        
+        content_layout.addLayout(stats_layout)
+        self.status_message = QLabel("Ready to connect.")
+        self.status_message.setObjectName("status_message")
+        content_layout.addWidget(self.status_message)
+        
+        self.status_progress = QProgressBar()
+        self.status_progress.setVisible(False)
+        self.status_progress.setMaximum(0)
+        content_layout.addWidget(self.status_progress)
+        
+        content_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        main_layout.addLayout(content_layout)
+        
+        self._reposition_pip()
+        
+        self.frame_timer = QTimer(self)
+        self.frame_timer.timeout.connect(self.update_frames)
+        self.frame_timer.start(33)  # ~30 FPS
 
     def _reposition_pip(self):
-        """Positions the PiP view at the top-right of the video panel."""
         if not hasattr(self, 'pip_view'):
             return
         margin = 10
@@ -400,7 +509,6 @@ class MainWindow(QMainWindow):
         self.pip_view.move(x, y)
 
     def resizeEvent(self, event):
-        """Overrides the resize event to keep the PiP in the corner."""
         super().resizeEvent(event)
         self._reposition_pip()
 
@@ -417,10 +525,13 @@ class MainWindow(QMainWindow):
             return True
         return super().eventFilter(obj, event)
 
-    # --- Public Methods (unchanged) ---
     def update_camera_list(self, cameras):
         self.camera_selector.clear()
         self.camera_selector.addItems([name for _, name in cameras])
+
+    def update_voice_list(self, voices):
+        self.voice_selector.clear()
+        self.voice_selector.addItems(voices)
 
     def update_audio_device_lists(self, input_devices, output_devices):
         self.input_device_selector.clear()
@@ -439,15 +550,47 @@ class MainWindow(QMainWindow):
     def update_status_message(self, message, is_error=False):
         self.status_message.setText(message)
         self.status_message.setObjectName("status_message_error" if is_error else "")
-        self.status_message.setStyleSheet(self.styleSheet()) # Re-apply stylesheet
-        is_loading = "waiting" in message.lower() or "deploying" in message.lower()
+        self.status_message.setStyleSheet(self.styleSheet())
+        is_loading = any(keyword in message.lower() for keyword in ["waiting", "deploying", "warming up"])
         self.status_progress.setVisible(is_error or is_loading)
-        if is_error and ("backend error" in message.lower() or "failed to start" in message.lower()):
-            QMessageBox.warning(self, "Backend Error", message)
+        if is_error:
+            if "no available gpus" in message.lower():
+                message += "\nCheck RunPod credits or try a different region/time (https://runpod.io/console)."
+            elif "api v2 is unavailable" in message.lower():
+                message += "\nCheck RunPod API docs for updates (https://docs.runpod.io)."
+            elif "webrtc" in message.lower():
+                message += "\nCheck network or firewall settings."
+            QMessageBox.warning(self, "Error", message)
 
     def update_video_panel_size(self, resolution):
-        # This function might not be needed anymore as the panel auto-sizes
-        # but can be kept if you need to force a specific aspect ratio logic
         width, height = resolution
         self.video_panel.setFixedSize(width, height)
         self.adjustSize()
+
+    def update_frames(self):
+        try:
+            if self.input_queue and not self.input_queue.empty():
+                raw_frame = self.input_queue.get_nowait()
+                if isinstance(raw_frame, np.ndarray):
+                    raw_rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = raw_rgb.shape
+                    qimage = QImage(raw_rgb.data, w, h, w * ch, QImage.Format.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimage).scaled(
+                        self.pip_view.size(), Qt.AspectRatioMode.KeepAspectRatio
+                    )
+                    self.pip_view.setPixmap(pixmap)
+            
+            if self.output_queue and not self.output_queue.empty():
+                processed_image = self.output_queue.get_nowait()
+                if isinstance(processed_image, Image.Image):
+                    processed_rgb = np.array(processed_image)
+                    h, w, ch = processed_rgb.shape
+                    qimage = QImage(processed_rgb.data, w, h, w * ch, QImage.Format.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimage).scaled(
+                        self.video_panel.size(), Qt.AspectRatioMode.KeepAspectRatio
+                    )
+                    self.video_panel.setPixmap(pixmap)
+        except queue.Empty:
+            pass
+        except Exception as e:
+            logging.error(f"Error updating frames: {str(e)}")

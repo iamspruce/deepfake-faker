@@ -103,7 +103,10 @@ jobs:
       - name: Copy PyInstaller outputs to Docker context
         run: |
           mkdir -p backends_dist/${{ matrix.backend }}
-          cp -r backends/${{ matrix.backend }}/dist/* backends_dist/${{ matrix.backend }}/
+          # Find the latest zip for this backend
+          ZIPFILE=$(ls -t *${{ matrix.backend }}*.zip | head -n1)
+          echo "Using $ZIPFILE"
+          unzip -o "$ZIPFILE" -d backends_dist/${{ matrix.backend }}
 
       - uses: docker/build-push-action@v5
         with:

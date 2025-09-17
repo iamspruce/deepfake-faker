@@ -11,3 +11,4 @@ aiohttp
 torch
 runpod
 numpy<2
+psutil

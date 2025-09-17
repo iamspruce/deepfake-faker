@@ -15,6 +15,7 @@ class VirtualDeviceManager:
         self.raw_cam = None
         self.processed_cam = None
         self.audio_stream = None
+        self.audio_output_queue = queue.Queue()  # Queue for processed audio
         
         try:
             backend = 'obs' if platform.system() == "Darwin" else None
@@ -52,6 +53,13 @@ class VirtualDeviceManager:
                         logging.warning("Audio queue full: Dropping packet to prevent blocking.")
             else:
                 outdata.fill(0)
+            
+            # Play processed audio if available
+            try:
+                processed_audio = self.audio_output_queue.get_nowait()
+                outdata[:] = processed_audio
+            except queue.Empty:
+                pass
 
         try:
             logging.info(f"Attempting to start audio stream with Input ID: {input_device_id} and Output ID: {output_device_id}")
@@ -77,18 +85,28 @@ class VirtualDeviceManager:
             logging.info("Duplex audio stream stopped.")
     
     def send_raw_frame(self, frame: np.ndarray):
-        if self.raw_cam:
+        if self.raw_cam and self.state.face_backend_status != 'error' and self.state.voice_backend_status != 'error':
             try:
                 self.raw_cam.send(frame)
             except Exception as e:
                 logging.warning(f"Failed to send raw frame: {str(e)}")
                 
     def send_processed_frame(self, frame: np.ndarray):
-        if self.processed_cam:
+        if self.processed_cam and self.state.face_backend_status != 'error' and self.state.voice_backend_status != 'error':
             try:
                 self.processed_cam.send(frame)
             except Exception as e:
                 logging.warning(f"Failed to send processed frame: {str(e)}")
+                
+    def send_processed_audio(self, audio_samples: np.ndarray, to_speaker: bool):
+        if self.audio_stream and self.state.voice_backend_status != 'error' and self.state.face_backend_status != 'error':
+            try:
+                if to_speaker:
+                    self.audio_output_queue.put_nowait(audio_samples)
+                # Virtual device output (e.g., via loopback or virtual audio cable) could be implemented here
+                # For now, assume virtual device uses the same audio stream output
+            except queue.Full:
+                logging.warning("Audio output queue full: Dropping processed audio.")
                 
     def close(self):
         if self.raw_cam:
