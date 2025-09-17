@@ -1,6 +1,9 @@
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
+COPY . /app
+
 WORKDIR /app
+
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -21,8 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-
 RUN pip install --upgrade pip==23.3.2
 
 # Install torch + GPU deps (CUDA 12.1 wheels)
@@ -30,7 +31,6 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 RUN pip install onnxruntime-gpu
 RUN pip install -r requirements.txt --no-cache-dir
 
-COPY . .
 
 RUN chmod +x start_face.sh
 

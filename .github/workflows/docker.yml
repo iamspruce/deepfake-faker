@@ -26,11 +26,11 @@ jobs:
 
       - name: Build Face Docker image
         run: |
-          docker build -t face-backend -f backends/face/Dockerfile.face .
+          docker build -t face-backend -f backends/face/Dockerfile.face backends/face
 
       - name: Run Face Backend Tests
         run: |
-          docker run --rm face-backend python3 backends/face/face_main.py --run-tests
+          docker run --rm face-backend python3 face_main.py --run-tests
 
       - name: Run Face Backend Container
         run: |
@@ -68,11 +68,11 @@ jobs:
 
       - name: Build Voice Docker image
         run: |
-          docker build -t voice-backend -f backends/voice/Dockerfile.voice .
+          docker build -t voice-backend -f backends/voice/Dockerfile.voice backends/voice
 
       - name: Run Voice Backend Tests
         run: |
-          docker run --rm voice-backend python3 backends/voice/voice_main.py --run-tests
+          docker run --rm voice-backend python3 voice_main.py --run-tests
 
       - name: Run Voice Backend Container
         run: |

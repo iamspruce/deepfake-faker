@@ -278,9 +278,9 @@ class AppController:
          
             # Start required backends
             if 8080 in ports_to_start:
-                self.voice_process_monitor = start_backend("voice", 8080)
+                self.voice_process_monitor = start_backend(self, "voice", 8080)
             if 8081 in ports_to_start:
-                self.face_process_monitor = start_backend("face", 8081)
+                self.face_process_monitor = start_backend(self, "face", 8081)
 
             self.state.face_server_endpoint = "http://localhost:8081"
             self.state.voice_server_endpoint = "http://localhost:8080"
@@ -297,9 +297,9 @@ class AppController:
                 start_fn()
 
             if self.voice_process_monitor:
-                self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice",  start_backend("voice", 8080)))
+                self.voice_process_monitor.signals.error.connect(lambda msg: handle_crash("Voice",  start_backend(self, "voice", 8080)))
             if self.face_process_monitor:
-                self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_backend("voice", 8081)))
+                self.face_process_monitor.signals.error.connect(lambda msg: handle_crash("Face", start_backend(self, "voice", 8081)))
 
             self.start_media_stream()
         except Exception as e:
