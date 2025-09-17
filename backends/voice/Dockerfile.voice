@@ -1,0 +1,39 @@
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    unzip \
+    libsndfile1 \
+    ffmpeg \
+    libffi-dev \
+    libssl-dev \
+    libportaudio2 \
+    libportaudiocpp0 \
+    portaudio19-dev \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+RUN pip install --upgrade pip==23.3.2
+
+# Install torch + GPU deps
+RUN pip install torch==2.0.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html
+RUN pip install fairseq==0.12.2 faiss-cpu==1.7.3
+RUN pip install -r requirements.txt --no-cache-dir
+
+COPY . .
+
+RUN chmod +x start_voice.sh
+
+EXPOSE 8080
+
+CMD ["./start_voice.sh"]

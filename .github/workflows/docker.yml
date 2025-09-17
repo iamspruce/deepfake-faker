@@ -1,0 +1,92 @@
+name: Build and Test Backends
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test-face:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space (before build)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/chromium /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/swift
+          sudo rm -rf /usr/local/lib/node_modules /opt/hostedtoolcache/go /opt/hostedtoolcache/Ruby
+          docker system prune --all --force --volumes
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          pip cache purge || true
+          df -h
+
+      - name: Build Face Docker image
+        run: |
+          docker build -t face-backend -f backends/Dockerfile.face .
+
+      - name: Run Face Backend Tests
+        run: |
+          docker run --rm face-backend python backends/face/face_main.py --run-tests
+
+      - name: Run Face Backend Container
+        run: |
+          docker run -d --name face-backend -p 8081:8081 face-backend
+          sleep 15  # give time for model downloads + initialization
+          curl --fail http://localhost:8081/health
+          docker logs face-backend
+          docker stop face-backend
+
+      - name: Free Disk Space (after tests)
+        if: always()
+        run: |
+          docker system prune --all --force --volumes
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          pip cache purge || true
+          df -h
+
+  build-and-test-voice:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space (before build)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/chromium /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/swift
+          sudo rm -rf /usr/local/lib/node_modules /opt/hostedtoolcache/go /opt/hostedtoolcache/Ruby
+          docker system prune --all --force --volumes
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          pip cache purge || true
+          df -h
+
+      - name: Build Voice Docker image
+        run: |
+          docker build -t voice-backend -f backends/Dockerfile.voice .
+
+      - name: Run Voice Backend Tests
+        run: |
+          docker run --rm voice-backend python backends/voice/voice_main.py --run-tests
+
+      - name: Run Voice Backend Container
+        run: |
+          docker run -d --name voice-backend -p 8080:8080 voice-backend
+          sleep 15  # allow RVC models to download + initialize
+          curl --fail http://localhost:8080/health
+          docker logs voice-backend
+          docker stop voice-backend
+
+      - name: Free Disk Space (after tests)
+        if: always()
+        run: |
+          docker system prune --all --force --volumes
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          pip cache purge || true
+          df -h
