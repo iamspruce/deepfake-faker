@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libffi-dev \
     libssl-dev \
+    libportaudio2 \
+    libportaudiocpp0 \
     portaudio19-dev \
     python3.10 \
     python3.10-venv \
@@ -37,7 +39,7 @@ RUN /app/venv/bin/pip install pyinstaller
 RUN /app/venv/bin/pip install -r requirements.txt --no-cache-dir
 
 # Install GPU-specific dependencies
-RUN /app/venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN /app/venv/bin/pip install torch
 RUN /app/venv/bin/pip install onnxruntime-gpu
 
 # Build binary with PyInstaller
