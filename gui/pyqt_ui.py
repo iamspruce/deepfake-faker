@@ -135,8 +135,9 @@ STYLESheet = """
 """
 
 class ConnectionDialog(QDialog):
-    def __init__(self, has_gpu, parent=None):
+    def __init__(self, has_gpu, parent=None, stop_thread_callback=None):
         super().__init__(parent)
+        self.stop_thread_callback = stop_thread_callback
         self.setWindowTitle("Connection Setup")
         self.setModal(True)
         self.setStyleSheet(STYLESheet)
@@ -250,27 +251,36 @@ class ConnectionDialog(QDialog):
 
     def accept(self):
         if self.runpod_radio.isChecked():
-            api_key = self.runpod_entry.text().strip()
-            if not api_key:
+            if not self.runpod_entry.text().strip():
                 self.runpod_entry.setPlaceholderText("API Key required!")
                 return
-            self.show_confirmation("cloud", api_key=api_key)
+            self.result = {"mode": "cloud", "api_key": self.runpod_entry.text()}
         elif self.custom_url_radio.isChecked():
-            face_url = self.face_url_entry.text().strip()
-            voice_url = self.voice_url_entry.text().strip()
-            if not (face_url and voice_url):
-                if not face_url:
-                    self.face_url_entry.setPlaceholderText("Face URL required!")
-                if not voice_url:
-                    self.voice_url_entry.setPlaceholderText("Voice URL required!")
+            if not (self.face_url_entry.text().strip() and self.voice_url_entry.text().strip()):
+                self.face_url_entry.setPlaceholderText("Face URL required!" if not self.face_url_entry.text().strip() else "")
+                self.voice_url_entry.setPlaceholderText("Voice URL required!" if not self.voice_url_entry.text().strip() else "")
                 return
-            self.show_confirmation("custom_urls", face_url=face_url, voice_url=voice_url)
+            self.result = {
+                "mode": "custom_urls",
+                "face_url": self.face_url_entry.text(),
+                "voice_url": self.voice_url_entry.text()
+            }
         elif self.force_local_radio.isChecked():
-            self.show_confirmation("local_cpu")
+            self.result = {"mode": "local_cpu"}
+        super().accept()  # Emit accepted signal
+        
+    def reject(self):
+        super().reject()  # Emit rejected signal
+        
+    def closeEvent(self, event):
+        if self.stop_thread_callback:
+            self.stop_thread_callback()
+        super().closeEvent(event)
 
 class StartupDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, stop_thread_callback=None):
         super().__init__(parent)
+        self.stop_thread_callback = stop_thread_callback
         self.setWindowTitle("System Requirements Check")
         self.setModal(True)
         self.setStyleSheet(STYLESheet)
@@ -347,6 +357,11 @@ class StartupDialog(QDialog):
         elif self.force_local_radio.isChecked():
             self.result = {"mode": "local_cpu"}
         super().accept()
+    
+    def closeEvent(self, event):
+        if self.stop_thread_callback:
+            self.stop_thread_callback()
+        super().closeEvent(event)
 
 class MainWindow(QMainWindow):
     def __init__(self, callbacks, input_queue=None, output_queue=None):
@@ -594,3 +609,7 @@ class MainWindow(QMainWindow):
             pass
         except Exception as e:
             logging.error(f"Error updating frames: {str(e)}")
+            
+    def closeEvent(self, event):
+        self.callbacks.get("on_closing", lambda: None)()
+        super().closeEvent(event)

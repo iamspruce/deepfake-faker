@@ -35,12 +35,16 @@ class StatsUpdateSignal(QObject):
 
 class DeploymentWorker(QThread):
     status_update = pyqtSignal(str)
-    deployment_complete = pyqtSignal(str, str, str, str)  # voice_url, face_url, voice_id, face_id
+    deployment_complete = pyqtSignal(str, str, str, str)
     error = pyqtSignal(str)
 
     def __init__(self, api_key):
         super().__init__()
         self.api_key = api_key
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
 
     def run(self):
         try:
@@ -49,16 +53,22 @@ class DeploymentWorker(QThread):
             face_image = "spruceemma/face-backend:latest"
             
             self.status_update.emit("Deploying voice backend (this can take 5-10 mins)...")
+            if self.stopped:
+                return
             voice_url, voice_id = manager.deploy_and_poll_endpoint("my-voice-backend", voice_image, 8080)
             
             self.status_update.emit("Deploying face backend (this can take 5-10 mins)...")
+            if self.stopped:
+                return
             face_url, face_id = manager.deploy_and_poll_endpoint("my-face-backend", face_image, 8081)
             
-            self.deployment_complete.emit(voice_url, face_url, voice_id, face_id)
+            if not self.stopped:
+                self.deployment_complete.emit(voice_url, face_url, voice_id, face_id)
         except Exception as e:
-            logging.error(f"Deployment error: {str(e)}\n{traceback.format_exc()}")
-            self.error.emit(str(e))
-
+            if not self.stopped:
+                logging.error(f"Deployment error: {str(e)}\n{traceback.format_exc()}")
+                self.error.emit(str(e))
+                
 class AppController:
     def __init__(self, initial_mode_config):
         self.app = QApplication.instance()
@@ -115,8 +125,9 @@ class AppController:
             self.start_media_stream()
 
     def start_deployment_worker(self):
-        if self.deployment_worker:
-            self.deployment_worker.terminate()
+        if self.deployment_worker and self.deployment_worker.isRunning():
+            self.deployment_worker.stop()
+            self.deployment_worker.wait()  # Wait for thread to finish
         self.deployment_worker = DeploymentWorker(self.state.runpod_api_key)
         self.deployment_worker.status_update.connect(self.ui.update_status_message)
         self.deployment_worker.error.connect(lambda msg: self.ui.update_status_message(msg, is_error=True))
@@ -369,7 +380,7 @@ class AppController:
                 self.ui.connect_button.setObjectName("connect_button")
                 self.ui.setStyleSheet(self.ui.styleSheet())  # Refresh stylesheet
             else:
-                dialog = ConnectionDialog(has_gpu=check_gpu(), parent=self.ui)
+                dialog = ConnectionDialog(has_gpu=check_gpu(), parent=self.ui, stop_thread_callback=self.stop_deployment_worker)
                 if dialog.exec():
                     config = dialog.result
                     if config:
@@ -398,6 +409,11 @@ class AppController:
             logging.error(f"Connect/Disconnect error: {str(e)}\n{traceback.format_exc()}")
             self.ui.update_status_message(f"Error: {str(e)}", is_error=True)
 
+    def stop_deployment_worker(self):
+        if self.deployment_worker and self.deployment_worker.isRunning():
+            self.deployment_worker.stop()
+            self.deployment_worker.wait()
+        
     def handle_status_update(self, backend: str, status: str):
         self.state.server_status = f"{backend.capitalize()} backend: {status}"
         if status == "healthy":
@@ -542,6 +558,9 @@ class AppController:
 
     def on_closing(self):
         logging.info("Application closing...")
+        if self.deployment_worker and self.deployment_worker.isRunning():
+            self.deployment_worker.stop()
+            self.deployment_worker.wait()
         if self.state.operating_mode == "cloud" and self.state.runpod_api_key:
             endpoint_ids_to_terminate = [
                 eid for eid in [self.state.voice_endpoint_id, self.state.face_endpoint_id] if eid
@@ -559,20 +578,24 @@ class AppController:
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     has_gpu = check_gpu()
-    initial_config = None
+    controller = None
     if has_gpu:
         logging.info("Compatible GPU found. Starting in local GPU mode.")
-        initial_config = {"mode": "local_gpu"}
-    else:
-        logging.info("No compatible GPU detected. Showing startup options.")
-        startup_dialog = StartupDialog()
-        if startup_dialog.exec():
-            initial_config = startup_dialog.result
-        else:
-            initial_config = None
-    if initial_config:
-        controller = AppController(initial_config)
+        controller = AppController({"mode": "local_gpu"})
         controller.run()
     else:
-        logging.info("No startup option selected. Exiting application.")
-        sys.exit(0)
+        logging.info("No compatible GPU detected. Showing startup options.")
+        def start_controller(config):
+            global controller
+            if config:
+                controller = AppController(config)
+                controller.run()
+            else:
+                logging.info("No startup option selected. Exiting application.")
+                app.quit()
+
+        startup_dialog = StartupDialog(stop_thread_callback=lambda: None)
+        startup_dialog.accepted.connect(lambda: start_controller(startup_dialog.result))
+        startup_dialog.rejected.connect(app.quit)
+        startup_dialog.show()
+        app.exec()
